@@ -2,7 +2,7 @@
 
 const { createHash } = require('node:crypto')
 const { createWriteStream, existsSync, readFileSync } = require('node:fs')
-const { cp, mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises')
+const { cp, mkdir, readFile, readdir, rename, rm, writeFile } = require('node:fs/promises')
 const https = require('node:https')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
@@ -14,6 +14,40 @@ const NPM_PACKAGE = '@deepseek-ai/dsh'
 const NPM_REGISTRY_API = 'https://registry.npmjs.org/@deepseek-ai%2Fdsh'
 const ARCHIVE_PATTERN = /(?:harness.*(?:runtime|win|windows)|(?:runtime|win|windows).*harness).+\.(?:tar\.gz|tgz|zip)$/iu
 const STATE_FILE = 'runtime-selection.json'
+
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+
+async function removeWithRetry(target, { attempts = 6, delay = 250 } = {}) {
+  let lastError
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      lastError = error
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(error.code) || attempt === attempts - 1) throw error
+      await wait(delay * (attempt + 1))
+    }
+  }
+  if (lastError) throw lastError
+}
+
+async function removeStaleStaging(runtimeDirectory, logger) {
+  let entries
+  try {
+    entries = await readdir(runtimeDirectory, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('.update-')) continue
+    try {
+      await removeWithRetry(path.join(runtimeDirectory, entry.name))
+    } catch (error) {
+      logger?.warn(`Skipped locked Harness update staging ${entry.name}: ${error.code ?? error.message}`, 'updater')
+    }
+  }
+}
 
 function normalizeVersion(value) {
   return String(value ?? '').trim().replace(/^v/iu, '')
@@ -286,25 +320,30 @@ class HarnessRuntimeUpdater {
     }
   }
 
-  async install(update) {
+  async install(update, { onProgress } = {}) {
     if (update?.status !== 'update-available') throw new Error('No installable Harness update was provided')
     const runtimeDirectory = path.join(this.userData, 'runtime')
-    const staging = path.join(runtimeDirectory, `.update-${update.latestVersion}-${process.pid}`)
+    const staging = path.join(runtimeDirectory, `.update-${update.latestVersion}-${process.pid}-${Date.now()}`)
     // Keep the official archive extension so npm recognizes a local .tgz package.
     // A .tgz.download suffix is treated as a directory by npm 11 on Windows.
     const archive = path.join(runtimeDirectory, update.asset.name)
     const staleDownload = `${archive}.download`
     const target = path.join(runtimeDirectory, `harness-${update.latestVersion}`)
     await mkdir(runtimeDirectory, { recursive: true })
-    await rm(staging, { recursive: true, force: true })
-    await rm(archive, { force: true })
-    await rm(staleDownload, { force: true })
+    await removeStaleStaging(runtimeDirectory, this.logger)
+    await removeWithRetry(staging)
+    await removeWithRetry(archive)
+    await removeWithRetry(staleDownload)
+    onProgress?.({ phase: 'download', percent: 0, message: `正在下载官方 Harness ${update.latestVersion}` })
     this.logger?.info(`Downloading official Harness ${update.latestVersion} from ${update.releaseUrl}.`, 'updater')
     await download(update.asset.url, archive, (received, total) => {
       if (total > 0 && (received === total || received % (25 * 1024 * 1024) < 1024 * 1024)) {
-        this.logger?.info(`Harness update download ${Math.round(received / total * 100)}%.`, 'updater')
+        const percent = Math.round(received / total * 100)
+        this.logger?.info(`Harness update download ${percent}%.`, 'updater')
+        onProgress?.({ phase: 'download', percent, message: `正在下载官方 Harness ${update.latestVersion}（${percent}%）` })
       }
     })
+    onProgress?.({ phase: 'verify', percent: 72, message: '正在校验运行时完整性' })
     const digest = update.source === 'npm'
       ? await integrity(archive, update.asset.integrity.split('-', 1)[0])
       : await sha256(archive)
@@ -313,6 +352,7 @@ class HarnessRuntimeUpdater {
       await rm(archive, { force: true })
       throw new Error(`Harness update integrity mismatch: expected ${expectedDigest}, got ${digest}`)
     }
+    onProgress?.({ phase: 'install', percent: 78, message: '正在安装 Harness 运行时依赖' })
     await mkdir(staging, { recursive: true })
     if (update.source === 'npm') {
       await installNpmPackage({
@@ -325,7 +365,8 @@ class HarnessRuntimeUpdater {
     } else {
       await extractArchive(archive, staging)
     }
-    await rm(archive, { force: true })
+    await removeWithRetry(archive)
+    onProgress?.({ phase: 'validate', percent: 94, message: '正在验证 Harness 运行时' })
     const root = await findRuntimeRoot(staging)
     if (!root) throw new Error('Official runtime archive has no recognizable Harness layout')
     await writeFile(path.join(root, 'desktop-runtime.json'), `${JSON.stringify({
@@ -335,18 +376,19 @@ class HarnessRuntimeUpdater {
       installed_at: new Date().toISOString(),
     }, null, 2)}\n`, 'utf8')
     if (!validRuntime(root, update.latestVersion)) {
-      await rm(staging, { recursive: true, force: true })
+      await removeWithRetry(staging)
       throw new Error(`Official runtime ${update.latestVersion} failed validation`)
     }
     await rm(target, { recursive: true, force: true })
     await rename(root, target)
-    if (root !== staging) await rm(staging, { recursive: true, force: true })
+    if (root !== staging) await removeWithRetry(staging)
     const state = await readState(this.userData)
     await writeState(this.userData, {
       active: state.active,
       pending: { version: update.latestVersion, path: target, attempts: 0 },
     })
     this.logger?.info(`Official Harness ${update.latestVersion} is staged and will activate after a successful restart.`, 'updater')
+    onProgress?.({ phase: 'complete', percent: 100, message: `Harness ${update.latestVersion} 已安装，正在重启服务` })
     return { version: update.latestVersion, path: target }
   }
 

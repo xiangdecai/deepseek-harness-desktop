@@ -81,6 +81,7 @@ h1 {
 }
 
 .status-line.error { color: #b42318; }
+.status-line.update { color: #2557a7; }
 
 .progress-track {
   position: relative;
@@ -108,6 +109,12 @@ h1 {
   width: 100%;
   background: #d6453d;
   animation: none;
+}
+
+.progress-track.update span {
+  background: #2557a7;
+  animation: none;
+  transition: width 180ms ease;
 }
 
 .status-detail {

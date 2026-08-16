@@ -25,6 +25,7 @@ let runtimeUpdater
 let runtimePath
 let fallbackRuntimePath
 let runtimeVersionValue = ''
+let updateInProgress = false
 
 function projectPath(...segments) {
   return path.join(__dirname, '..', ...segments)
@@ -132,7 +133,10 @@ async function restartService() {
 }
 
 async function installHarnessUpdate(update) {
+  if (updateInProgress) return
+  updateInProgress = true
   if (service.mode === 'attached') {
+    updateInProgress = false
     await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: '无法更新运行时',
@@ -143,12 +147,23 @@ async function installHarnessUpdate(update) {
   }
   const previousRuntime = runtimePath
   const previousVersion = runtimeVersionValue
-  const installed = await runtimeUpdater.install(update)
-  await service.stop()
-  runtimePath = installed.path
-  runtimeVersionValue = installed.version
-  service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+  let serviceStopped = false
   try {
+    await showStartupPage()
+    mainWindow?.webContents.send('desktop:update-progress', {
+      phase: 'prepare', percent: 0, message: `正在准备 Harness ${update.latestVersion} 更新`,
+    })
+    const installed = await runtimeUpdater.install(update, {
+      onProgress: progress => mainWindow?.webContents.send('desktop:update-progress', progress),
+    })
+    mainWindow?.webContents.send('desktop:update-progress', {
+      phase: 'restart', percent: 97, message: '正在重启 Harness 服务',
+    })
+    await service.stop()
+    serviceStopped = true
+    runtimePath = installed.path
+    runtimeVersionValue = installed.version
+    service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
     await showHarness()
@@ -165,19 +180,26 @@ async function installHarnessUpdate(update) {
     runtimePath = previousRuntime
     runtimeVersionValue = previousVersion
     service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
-    try {
-      await service.start()
+    if (serviceStopped) {
+      try {
+        await service.start()
+        await showHarness()
+        buildMenus()
+      } catch (rollbackError) {
+        logger.error(`Harness update rollback failed: ${rollbackError.message}`, 'updater')
+      }
+    } else {
       await showHarness()
-      buildMenus()
-    } catch (rollbackError) {
-      logger.error(`Harness update rollback failed: ${rollbackError.message}`, 'updater')
     }
     throw error
+  } finally {
+    updateInProgress = false
   }
 }
 
 async function checkHarnessUpdate() {
   if (!runtimeUpdater) return
+  if (updateInProgress) return
   const result = await runtimeUpdater.check(runtimeVersionValue)
   if (result.status === 'up-to-date') {
     await dialog.showMessageBox(mainWindow, {

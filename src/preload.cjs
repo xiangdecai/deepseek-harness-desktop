@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('harnessDesktop', {
     ipcRenderer.on('desktop:log', listener)
     return () => ipcRenderer.removeListener('desktop:log', listener)
   },
+  onUpdateProgress: callback => {
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on('desktop:update-progress', listener)
+    return () => ipcRenderer.removeListener('desktop:update-progress', listener)
+  },
 })
 
 async function insertEvidence(target, evidence) {
@@ -81,4 +86,3 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }, { capture: true })
 })
-

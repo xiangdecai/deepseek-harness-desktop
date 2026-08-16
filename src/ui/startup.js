@@ -7,6 +7,7 @@ const serviceDetail = document.getElementById('service-detail')
 const progressTrack = document.getElementById('progress-track')
 const retryButton = document.getElementById('retry')
 const logDrawer = document.getElementById('log-drawer')
+let updateMode = false
 
 function addLog(record) {
   const row = document.createElement('div')
@@ -32,6 +33,7 @@ function statusFromLog(message) {
 }
 
 function renderStatus(service, lastMessage = '') {
+  if (updateMode) return
   const isReady = service.mode === 'managed' || service.mode === 'attached'
   const isError = !isReady && /failed|error|exited|did not become ready/iu.test(lastMessage)
   progressTrack.className = `progress-track${isReady ? ' ready' : isError ? ' error' : ''}`
@@ -53,7 +55,21 @@ function renderStatus(service, lastMessage = '') {
   }
 }
 
+function renderUpdateProgress(progress = {}) {
+  updateMode = true
+  const percent = Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : undefined
+  statusLine.className = 'status-line update'
+  statusLine.textContent = '正在更新官方 Harness'
+  statusDetail.textContent = progress.message || '正在准备更新'
+  serviceDetail.textContent = percent === undefined ? '安装依赖可能需要一些时间' : `${percent}%`
+  progressTrack.className = `progress-track update${progress.phase === 'complete' ? ' ready' : ''}`
+  progressTrack.querySelector('span').style.width = percent === undefined ? '' : `${percent}%`
+  retryButton.hidden = true
+  logDrawer.open = true
+}
+
 async function initialize() {
+  window.harnessDesktop.onUpdateProgress(renderUpdateProgress)
   const state = await window.harnessDesktop.getState()
   let lastMessage = ''
   state.logs.forEach(record => { lastMessage = addLog(record) })

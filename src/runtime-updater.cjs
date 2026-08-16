@@ -455,6 +455,9 @@ async function installNpmPackage({ staging, archive, version, nodeExecutable, np
   const packageRoot = path.join(staging, 'node_modules', '@deepseek-ai', 'dsh')
   if (!existsSync(path.join(packageRoot, 'lib', 'bin.js'))) throw new Error('npm installed Harness package has no lib/bin.js')
   await cp(path.join(packageRoot, 'lib'), path.join(staging, 'lib'), { recursive: true })
+  if (existsSync(path.join(packageRoot, 'config'))) {
+    await cp(path.join(packageRoot, 'config'), path.join(staging, 'config'), { recursive: true })
+  }
   for (const file of ['package.json', 'README.md', 'README.zh.md', 'README.i18n.yaml', 'LICENSE']) {
     const source = path.join(packageRoot, file)
     if (existsSync(source)) await cp(source, path.join(staging, file))

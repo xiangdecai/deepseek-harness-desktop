@@ -1,0 +1,83 @@
+{
+  "name": "deepseek-harness-desktop",
+  "version": "0.1.0",
+  "description": "Native Windows desktop carrier for the official DeepSeek Harness Web UI",
+  "author": "Xiangong AI",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "prepare:icon": "node scripts/make-icon.mjs",
+    "prepare:node": "node scripts/fetch-node-runtime.mjs",
+    "prepare:harness": "node scripts/prepare-harness-runtime.mjs",
+    "prepare:archive": "node scripts/pack-harness-archive.mjs",
+    "prepare:licenses": "node scripts/prepare-licenses.mjs",
+    "prepare:runtime": "npm run prepare:icon && npm run prepare:node && npm run prepare:harness && npm run prepare:archive && npm run prepare:licenses",
+    "pack:dir": "electron-builder --win --x64 --dir",
+    "pack:win": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "extract-zip": "2.0.1",
+    "png-to-ico": "3.0.1",
+    "sharp": "0.34.4",
+    "ws": "^8.18.3"
+  },
+  "build": {
+    "appId": "ai.deepseek.harness.desktop",
+    "productName": "DeepSeek Harness Desktop",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "asarUnpack": [
+      "src/windows-ocr.ps1"
+    ],
+    "files": [
+      "src/**/*",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/node",
+        "to": "node"
+      },
+      {
+        "from": "resources/harness-runtime.tar.gz",
+        "to": "harness-runtime.tar.gz"
+      },
+      {
+        "from": "resources/runtime-manifest.json",
+        "to": "runtime-manifest.json"
+      },
+      {
+        "from": "resources/licenses",
+        "to": "licenses"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "DeepSeek-Harness-Desktop-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DeepSeek Harness Desktop",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "DeepSeek-Harness-Desktop-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

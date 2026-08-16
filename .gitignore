@@ -1,0 +1,14 @@
+node_modules/
+.downloads/
+dist/
+release/
+resources/node/*
+resources/harness/*
+resources/harness-runtime.tar.gz
+resources/harness-runtime.zip
+resources/runtime-manifest.json
+!resources/node/.gitkeep
+!resources/harness/.gitkeep
+assets/icon.png
+assets/icon.ico
+*.log

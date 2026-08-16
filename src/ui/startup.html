@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+    <title>DeepSeek Harness Desktop</title>
+    <link rel="stylesheet" href="startup.css">
+  </head>
+  <body>
+    <main class="boot-shell">
+      <section class="boot-panel" aria-live="polite">
+        <div class="brand-mark">
+          <img src="../../assets/icon.png" width="64" height="64" alt="DeepSeek">
+        </div>
+        <h1>DeepSeek Harness</h1>
+        <p class="product-label">Desktop</p>
+        <p id="status-line" class="status-line">正在启动本地 Harness 服务</p>
+        <div id="progress-track" class="progress-track" role="progressbar" aria-label="Harness 启动进度">
+          <span></span>
+        </div>
+        <p id="status-detail" class="status-detail">正在准备运行环境</p>
+        <p id="service-detail" class="service-detail"></p>
+
+        <div class="primary-actions">
+          <button id="retry" class="primary" type="button" hidden>重新启动</button>
+          <button id="view-log" class="text-button" type="button">查看启动日志</button>
+        </div>
+
+        <p class="footnote">关闭窗口后，后台服务会继续运行</p>
+      </section>
+
+      <details id="log-drawer" class="log-drawer">
+        <summary>启动日志</summary>
+        <div class="drawer-actions">
+          <button id="open-logs" class="text-button" type="button">打开日志目录</button>
+          <button id="open-data" class="text-button" type="button">打开数据目录</button>
+        </div>
+        <div id="logs" class="logs" role="log" aria-live="polite"></div>
+      </details>
+    </main>
+
+    <script src="startup.js"></script>
+  </body>
+</html>

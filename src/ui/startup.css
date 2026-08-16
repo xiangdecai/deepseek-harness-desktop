@@ -1,0 +1,231 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+  color: #20232a;
+  background: #ffffff;
+  letter-spacing: 0;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; margin: 0; }
+
+body {
+  min-width: 360px;
+  min-height: 100vh;
+  background: #ffffff;
+}
+
+button {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.boot-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px 28px;
+}
+
+.boot-panel {
+  display: flex;
+  width: min(100%, 420px);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.brand-mark {
+  display: grid;
+  width: 80px;
+  height: 80px;
+  place-items: center;
+  margin-bottom: 20px;
+  border: 1px solid #e9e4d8;
+  border-radius: 17px;
+  background: #f6f1e7;
+  box-shadow: 0 8px 24px rgb(31 35 42 / 8%);
+}
+
+.brand-mark img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+
+h1 {
+  margin: 0;
+  color: #20232a;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.product-label {
+  margin: 4px 0 18px;
+  color: #9a9da4;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status-line {
+  min-height: 22px;
+  margin: 0;
+  color: #515660;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.status-line.error { color: #b42318; }
+
+.progress-track {
+  position: relative;
+  width: min(100%, 280px);
+  height: 2px;
+  margin: 18px 0 13px;
+  overflow: hidden;
+  background: #e7e9ee;
+}
+
+.progress-track span {
+  display: block;
+  width: 32%;
+  height: 100%;
+  background: #4d6bfe;
+  animation: boot-progress 1.7s ease-in-out infinite;
+}
+
+.progress-track.ready span {
+  width: 100%;
+  animation: none;
+}
+
+.progress-track.error span {
+  width: 100%;
+  background: #d6453d;
+  animation: none;
+}
+
+.status-detail {
+  min-height: 18px;
+  max-width: 360px;
+  margin: 0;
+  overflow: hidden;
+  color: #858993;
+  font-size: 12px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-detail {
+  min-height: 18px;
+  margin: 3px 0 0;
+  color: #858993;
+  font: 11px/1.5 Consolas, "Cascadia Mono", monospace;
+}
+
+.primary-actions {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.primary {
+  min-width: 104px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #4d6bfe;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.primary:hover { background: #3f5be0; }
+
+.text-button {
+  padding: 7px 5px;
+  color: #69707c;
+  background: transparent;
+  font-size: 12px;
+}
+
+.text-button:hover { color: #4d6bfe; }
+
+.text-button:focus-visible,
+.primary:focus-visible,
+.log-drawer summary:focus-visible {
+  outline: 2px solid #4d6bfe;
+  outline-offset: 3px;
+}
+
+.footnote {
+  margin: 22px 0 0;
+  color: #a0a3aa;
+  font-size: 11px;
+}
+
+.log-drawer {
+  width: min(100%, 560px);
+  margin-top: 34px;
+  border-top: 1px solid #eceef2;
+  color: #6c727d;
+}
+
+.log-drawer summary {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 10px 2px;
+  color: #7b818c;
+  font-size: 12px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.drawer-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  border-top: 1px solid #f0f1f4;
+  padding-top: 4px;
+}
+
+.logs {
+  height: 190px;
+  margin-top: 8px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid #e3e6eb;
+  border-radius: 6px;
+  color: #4c535e;
+  background: #fafbfc;
+  font: 11px/1.65 Consolas, "Cascadia Mono", monospace;
+  text-align: left;
+}
+
+.log-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-line .time { color: #9bA0aa; }
+.log-line.warn { color: #996b18; }
+.log-line.error { color: #b42318; }
+
+@keyframes boot-progress {
+  0% { transform: translateX(-120%); }
+  55%, 100% { transform: translateX(430%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-track span { animation: none; width: 58%; }
+}
+
+@media (max-width: 520px) {
+  .boot-shell { padding: 28px 18px 22px; }
+  .log-drawer { margin-top: 26px; }
+}

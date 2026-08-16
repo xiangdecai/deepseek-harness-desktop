@@ -1,12 +1,13 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = require('electron')
 const { mkdirSync } = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { AppLogger } = require('./logger.cjs')
 const { HarnessServiceManager } = require('./service-manager.cjs')
 const { ensureHarnessRuntime } = require('./runtime-loader.cjs')
+const { HarnessRuntimeUpdater, runtimeVersion } = require('./runtime-updater.cjs')
 const { VisionBridge } = require('./vision-bridge.cjs')
 
 const gotLock = app.requestSingleInstanceLock()
@@ -20,6 +21,10 @@ let service
 let vision
 let visionEnabled = true
 let quitting = false
+let runtimeUpdater
+let runtimePath
+let fallbackRuntimePath
+let runtimeVersionValue = ''
 
 function projectPath(...segments) {
   return path.join(__dirname, '..', ...segments)
@@ -126,6 +131,94 @@ async function restartService() {
   }
 }
 
+async function installHarnessUpdate(update) {
+  if (service.mode === 'attached') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '无法更新运行时',
+      message: '当前连接的是外部 Harness 实例。',
+      detail: '请先关闭外部实例，再从桌面应用更新官方 Harness。',
+    })
+    return
+  }
+  const previousRuntime = runtimePath
+  const previousVersion = runtimeVersionValue
+  const installed = await runtimeUpdater.install(update)
+  await service.stop()
+  runtimePath = installed.path
+  runtimeVersionValue = installed.version
+  service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+  try {
+    await service.start()
+    await runtimeUpdater.markHealthy(runtimePath)
+    await showHarness()
+    buildMenus()
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Harness 更新完成',
+      message: `官方 Harness ${installed.version} 已启用。`,
+      detail: '项目数据、会话目录和模型配置保持不变。',
+    })
+  } catch (error) {
+    logger.error(`Harness update activation failed: ${error.message}`, 'updater')
+    await runtimeUpdater.rollbackPending()
+    runtimePath = previousRuntime
+    runtimeVersionValue = previousVersion
+    service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+    try {
+      await service.start()
+      await showHarness()
+      buildMenus()
+    } catch (rollbackError) {
+      logger.error(`Harness update rollback failed: ${rollbackError.message}`, 'updater')
+    }
+    throw error
+  }
+}
+
+async function checkHarnessUpdate() {
+  if (!runtimeUpdater) return
+  const result = await runtimeUpdater.check(runtimeVersionValue)
+  if (result.status === 'up-to-date') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Harness 已是最新版本',
+      message: `当前官方 Harness 版本：${result.currentVersion}`,
+      detail: '没有发现需要安装的官方运行时更新。',
+    })
+    return
+  }
+  if (result.status === 'update-available') {
+    const answer = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现官方 Harness 更新',
+      message: `${result.currentVersion} → ${result.latestVersion}`,
+      detail: '应用将下载官方 Windows runtime，完成 SHA-256 校验后重启服务。项目会话与 DSH_HOME 不会被删除。',
+      buttons: ['立即更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (answer.response !== 0) return
+    try {
+      await installHarnessUpdate(result)
+    } catch (error) {
+      await dialog.showErrorBox('Harness 更新失败', `${error.message}\n\n原运行时已保留。`)
+    }
+    return
+  }
+  const detail = result.reason ?? '官方暂未提供可安装的 Windows runtime。'
+  const answer = await dialog.showMessageBox(mainWindow, {
+    type: result.status === 'error' ? 'warning' : 'info',
+    title: '暂时没有可安装的官方更新',
+    message: detail,
+    detail: `当前版本：${runtimeVersionValue}\n更新页面：${result.releaseUrl}`,
+    buttons: ['打开官方 Releases', '关闭'],
+    defaultId: 0,
+    cancelId: 1,
+  })
+  if (answer.response === 0) void shell.openExternal(result.releaseUrl)
+}
+
 function buildMenus() {
   const openBrowser = () => {
     if (service.url) void shell.openExternal(service.url)
@@ -179,6 +272,7 @@ function buildMenus() {
       label: '帮助',
       submenu: [
         { label: 'DeepSeek Harness 项目', click: () => void shell.openExternal('https://github.com/deepseek-ai/deepseek-harness') },
+        { label: '检查官方 Harness 更新', click: () => void checkHarnessUpdate() },
         { label: '关于', click: () => app.showAboutPanel() },
       ],
     },
@@ -243,16 +337,19 @@ async function boot() {
 
   logger = new AppLogger(logDirectory)
   logger.on('record', sendLog)
-  const runtimeRoot = await ensureHarnessRuntime({
+  fallbackRuntimePath = await ensureHarnessRuntime({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     userData: app.getPath('userData'),
     developmentRuntime: bundledPath('harness'),
     logger,
   })
+  runtimeUpdater = new HarnessRuntimeUpdater({ userData: app.getPath('userData'), logger })
+  runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
+  runtimeVersionValue = runtimeVersion(runtimePath) || runtimeVersion(fallbackRuntimePath)
   const dshEntry = !app.isPackaged && process.env.DHD_DSH_ENTRY
     ? path.resolve(process.env.DHD_DSH_ENTRY)
-    : path.join(runtimeRoot, 'lib', 'bin.js')
+    : path.join(runtimePath, 'lib', 'bin.js')
   service = new HarnessServiceManager({ nodeExecutable, dshEntry, dshHome, cwd: workspace, logger })
   vision = new VisionBridge({ cacheDirectory, scriptPath: ocrScriptPath(), logger })
   service.on('exit', ({ expected }) => {
@@ -267,10 +364,24 @@ async function boot() {
   logger.info(`DeepSeek Harness Desktop ${app.getVersion()} starting.`)
   try {
     await service.start()
+    await runtimeUpdater.markHealthy(runtimePath)
     await showHarness()
     buildMenus()
   } catch (error) {
     logger.error(`Startup failed: ${error.message}`)
+    const fallback = await runtimeUpdater.rollbackPending()
+    if (fallback || path.resolve(runtimePath) !== path.resolve(fallbackRuntimePath)) {
+      runtimePath = fallback || fallbackRuntimePath
+      runtimeVersionValue = runtimeVersion(runtimePath)
+      service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+      try {
+        await service.start()
+        await runtimeUpdater.markHealthy(runtimePath)
+        await showHarness()
+      } catch (fallbackError) {
+        logger.error(`Bundled Harness fallback failed: ${fallbackError.message}`)
+      }
+    }
     buildMenus()
   }
 }

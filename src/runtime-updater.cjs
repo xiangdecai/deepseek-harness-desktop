@@ -388,8 +388,14 @@ async function installNpmPackage({ staging, archive, version, nodeExecutable, np
   if (!nodeExecutable || !npmCli || !existsSync(nodeExecutable) || !existsSync(npmCli)) {
     throw new Error('Bundled npm is missing; rebuild the desktop package with the Node runtime preparation step')
   }
+  await writeFile(path.join(staging, 'package.json'), `${JSON.stringify({
+    name: 'deepseek-harness-runtime-staging',
+    version: '0.0.0',
+    private: true,
+  })}\n`, 'utf8')
   await new Promise((resolve, reject) => {
     const child = spawn(nodeExecutable, [npmCli, 'install', '--prefix', staging, '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', archive], {
+      cwd: staging,
       windowsHide: true,
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, NPM_CONFIG_UPDATE_NOTIFIER: 'false' },

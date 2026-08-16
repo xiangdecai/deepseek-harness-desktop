@@ -290,11 +290,15 @@ class HarnessRuntimeUpdater {
     if (update?.status !== 'update-available') throw new Error('No installable Harness update was provided')
     const runtimeDirectory = path.join(this.userData, 'runtime')
     const staging = path.join(runtimeDirectory, `.update-${update.latestVersion}-${process.pid}`)
-    const archive = path.join(runtimeDirectory, `${update.asset.name}.download`)
+    // Keep the official archive extension so npm recognizes a local .tgz package.
+    // A .tgz.download suffix is treated as a directory by npm 11 on Windows.
+    const archive = path.join(runtimeDirectory, update.asset.name)
+    const staleDownload = `${archive}.download`
     const target = path.join(runtimeDirectory, `harness-${update.latestVersion}`)
     await mkdir(runtimeDirectory, { recursive: true })
     await rm(staging, { recursive: true, force: true })
     await rm(archive, { force: true })
+    await rm(staleDownload, { force: true })
     this.logger?.info(`Downloading official Harness ${update.latestVersion} from ${update.releaseUrl}.`, 'updater')
     await download(update.asset.url, archive, (received, total) => {
       if (total > 0 && (received === total || received % (25 * 1024 * 1024) < 1024 * 1024)) {

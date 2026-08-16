@@ -303,7 +303,10 @@ class HarnessRuntimeUpdater {
         return state.pending.path
       }
     }
-    if (state.active && validRuntime(state.active.path, state.active.version)) return state.active.path
+    if (state.active && validRuntime(state.active.path, state.active.version)) {
+      if (fallbackVersion && compareVersions(fallbackVersion, state.active.version) > 0) return fallbackPath
+      return state.active.path
+    }
     if (state.active) await writeState(this.userData, {})
     return fallbackPath
   }

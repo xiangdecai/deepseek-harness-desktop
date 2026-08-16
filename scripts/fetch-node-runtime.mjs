@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -40,8 +41,18 @@ await rm(destination, { recursive: true, force: true })
 await mkdir(destination, { recursive: true })
 await cp(resolve(extractDirectory, 'node.exe'), resolve(destination, 'node.exe'))
 await cp(resolve(extractDirectory, 'LICENSE'), resolve(destination, 'LICENSE'))
+await cp(resolve(extractDirectory, 'node_modules', 'npm'), resolve(destination, 'node_modules', 'npm'), { recursive: true })
+await cp(resolve(extractDirectory, 'npm.cmd'), resolve(destination, 'npm.cmd'))
+await cp(resolve(extractDirectory, 'npx.cmd'), resolve(destination, 'npx.cmd'))
+const npmArchive = resolve(destination, 'npm-runtime.tar.gz')
+const tar = resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+await new Promise((resolvePromise, reject) => {
+  const child = spawn(tar, ['-czf', npmArchive, '-C', destination, 'node_modules/npm'], { windowsHide: true, stdio: 'ignore' })
+  child.once('error', reject)
+  child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`npm runtime archive failed with code ${code}`)))
+})
+await rm(resolve(destination, 'node_modules'), { recursive: true, force: true })
 await writeFile(resolve(destination, 'VERSION'), `v${version}\n`, 'utf8')
 await rm(archivePath, { force: true })
 await rm(extractDirectory, { recursive: true, force: true })
 console.log(`Bundled Node v${version}; SHA-256 ${actual}`)
-

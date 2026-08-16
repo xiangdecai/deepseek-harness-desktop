@@ -7,7 +7,7 @@ const path = require('node:path')
 const { AppLogger } = require('./logger.cjs')
 const { HarnessServiceManager } = require('./service-manager.cjs')
 const { ensureHarnessRuntime } = require('./runtime-loader.cjs')
-const { HarnessRuntimeUpdater, runtimeVersion } = require('./runtime-updater.cjs')
+const { HarnessRuntimeUpdater, extractNpmRuntime, runtimeVersion } = require('./runtime-updater.cjs')
 const { VisionBridge } = require('./vision-bridge.cjs')
 
 const gotLock = app.requestSingleInstanceLock()
@@ -333,6 +333,7 @@ async function boot() {
   const nodeExecutable = !app.isPackaged && process.env.DHD_NODE_EXECUTABLE
     ? path.resolve(process.env.DHD_NODE_EXECUTABLE)
     : bundledPath('node', 'node.exe')
+  const npmCli = await extractNpmRuntime(bundledPath('node', 'npm-runtime.tar.gz'), app.getPath('userData'), logger)
   const workspace = process.env.DSH_CWD ? path.resolve(process.env.DSH_CWD) : os.homedir()
 
   logger = new AppLogger(logDirectory)
@@ -344,7 +345,7 @@ async function boot() {
     developmentRuntime: bundledPath('harness'),
     logger,
   })
-  runtimeUpdater = new HarnessRuntimeUpdater({ userData: app.getPath('userData'), logger })
+  runtimeUpdater = new HarnessRuntimeUpdater({ userData: app.getPath('userData'), logger, nodeExecutable, npmCli })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
   runtimeVersionValue = runtimeVersion(runtimePath) || runtimeVersion(fallbackRuntimePath)
   const dshEntry = !app.isPackaged && process.env.DHD_DSH_ENTRY

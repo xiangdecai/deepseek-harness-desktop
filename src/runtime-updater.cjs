@@ -2,7 +2,7 @@
 
 const { createHash } = require('node:crypto')
 const { createWriteStream, existsSync, readFileSync } = require('node:fs')
-const { mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises')
+const { cp, mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises')
 const https = require('node:https')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
@@ -10,6 +10,8 @@ const { validRuntime } = require('./runtime-loader.cjs')
 
 const OFFICIAL_REPOSITORY = 'deepseek-ai/deepseek-harness'
 const RELEASES_API = `https://api.github.com/repos/${OFFICIAL_REPOSITORY}/releases/latest`
+const NPM_PACKAGE = '@deepseek-ai/dsh'
+const NPM_REGISTRY_API = 'https://registry.npmjs.org/@deepseek-ai%2Fdsh'
 const ARCHIVE_PATTERN = /(?:harness.*(?:runtime|win|windows)|(?:runtime|win|windows).*harness).+\.(?:tar\.gz|tgz|zip)$/iu
 const STATE_FILE = 'runtime-selection.json'
 
@@ -145,6 +147,13 @@ async function sha256(file) {
   return hash.digest('hex')
 }
 
+async function integrity(file, algorithm) {
+  const hash = createHash(algorithm)
+  const stream = require('node:fs').createReadStream(file)
+  for await (const chunk of stream) hash.update(chunk)
+  return `${algorithm}-${hash.digest('base64')}`
+}
+
 async function extractArchive(archive, destination) {
   const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
   await new Promise((resolve, reject) => {
@@ -158,6 +167,24 @@ async function extractArchive(archive, destination) {
     child.once('error', reject)
     child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Runtime archive extraction failed with code ${code}: ${stderr.trim()}`)))
   })
+}
+
+async function extractNpmRuntime(archive, userData, logger) {
+  if (!archive || !existsSync(archive)) return undefined
+  const destination = path.join(userData, 'npm-runtime')
+  const npmCli = path.join(destination, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  if (existsSync(npmCli)) return npmCli
+  await rm(destination, { recursive: true, force: true })
+  await mkdir(destination, { recursive: true })
+  try {
+    await extractArchive(archive, destination)
+    if (!existsSync(npmCli)) throw new Error('npm runtime archive has no npm-cli.js')
+    return npmCli
+  } catch (error) {
+    await rm(destination, { recursive: true, force: true })
+    logger?.warn(`Bundled npm extraction failed: ${error.message}`, 'updater')
+    return undefined
+  }
 }
 
 async function findRuntimeRoot(directory) {
@@ -189,11 +216,43 @@ class HarnessRuntimeUpdater {
   constructor(options) {
     this.userData = options.userData
     this.logger = options.logger
+    this.nodeExecutable = options.nodeExecutable
+    this.npmCli = options.npmCli
     this.releaseUrl = options.releaseUrl ?? 'https://github.com/deepseek-ai/deepseek-harness/releases'
     this.apiUrl = options.apiUrl ?? RELEASES_API
   }
 
   async check(currentVersion) {
+    try {
+      const npmResponse = await request(NPM_REGISTRY_API)
+      const metadata = JSON.parse(npmResponse.body)
+      const latestVersion = normalizeVersion(metadata['dist-tags']?.latest)
+      const versionInfo = metadata.versions?.[latestVersion]
+      if (latestVersion && compareVersions(latestVersion, currentVersion) <= 0) {
+        return { status: 'up-to-date', source: 'npm', currentVersion, latestVersion, releaseUrl: this.releaseUrl }
+      }
+      if (latestVersion && versionInfo?.dist?.tarball && versionInfo?.dist?.integrity) {
+        return {
+          status: 'update-available',
+          source: 'npm',
+          currentVersion,
+          latestVersion,
+          releaseUrl: `https://www.npmjs.com/package/${NPM_PACKAGE}`,
+          asset: {
+            name: `dsh-${latestVersion}.tgz`,
+            url: versionInfo.dist.tarball,
+            integrity: versionInfo.dist.integrity,
+          },
+        }
+      }
+      if (latestVersion) return { status: 'unsupported', source: 'npm', currentVersion, latestVersion, releaseUrl: this.releaseUrl, reason: 'npm 元数据缺少 tarball 或 integrity' }
+    } catch (error) {
+      this.logger?.warn(`npm Harness update check failed: ${error.message}`, 'updater')
+    }
+    return await this.checkGitHub(currentVersion)
+  }
+
+  async checkGitHub(currentVersion) {
     try {
       const response = await request(this.apiUrl)
       const release = JSON.parse(response.body)
@@ -242,13 +301,26 @@ class HarnessRuntimeUpdater {
         this.logger?.info(`Harness update download ${Math.round(received / total * 100)}%.`, 'updater')
       }
     })
-    const digest = await sha256(archive)
-    if (digest !== update.asset.digest) {
+    const digest = update.source === 'npm'
+      ? await integrity(archive, update.asset.integrity.split('-', 1)[0])
+      : await sha256(archive)
+    const expectedDigest = update.source === 'npm' ? update.asset.integrity : update.asset.digest
+    if (digest !== expectedDigest) {
       await rm(archive, { force: true })
-      throw new Error(`Harness update SHA-256 mismatch: expected ${update.asset.digest}, got ${digest}`)
+      throw new Error(`Harness update integrity mismatch: expected ${expectedDigest}, got ${digest}`)
     }
     await mkdir(staging, { recursive: true })
-    await extractArchive(archive, staging)
+    if (update.source === 'npm') {
+      await installNpmPackage({
+        staging,
+        archive,
+        version: update.latestVersion,
+        nodeExecutable: this.nodeExecutable,
+        npmCli: this.npmCli,
+      })
+    } else {
+      await extractArchive(archive, staging)
+    }
     await rm(archive, { force: true })
     const root = await findRuntimeRoot(staging)
     if (!root) throw new Error('Official runtime archive has no recognizable Harness layout')
@@ -312,9 +384,35 @@ class HarnessRuntimeUpdater {
   }
 }
 
+async function installNpmPackage({ staging, archive, version, nodeExecutable, npmCli }) {
+  if (!nodeExecutable || !npmCli || !existsSync(nodeExecutable) || !existsSync(npmCli)) {
+    throw new Error('Bundled npm is missing; rebuild the desktop package with the Node runtime preparation step')
+  }
+  await new Promise((resolve, reject) => {
+    const child = spawn(nodeExecutable, [npmCli, 'install', '--prefix', staging, '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', archive], {
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, NPM_CONFIG_UPDATE_NOTIFIER: 'false' },
+    })
+    let stderr = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.once('error', reject)
+    child.once('exit', code => code === 0 ? resolve() : reject(new Error(`npm install for Harness ${version} failed with code ${code}: ${stderr.trim()}`)))
+  })
+  const packageRoot = path.join(staging, 'node_modules', '@deepseek-ai', 'dsh')
+  if (!existsSync(path.join(packageRoot, 'lib', 'bin.js'))) throw new Error('npm installed Harness package has no lib/bin.js')
+  await cp(path.join(packageRoot, 'lib'), path.join(staging, 'lib'), { recursive: true })
+  for (const file of ['package.json', 'README.md', 'README.zh.md', 'README.i18n.yaml', 'LICENSE']) {
+    const source = path.join(packageRoot, file)
+    if (existsSync(source)) await cp(source, path.join(staging, file))
+  }
+}
+
 module.exports = {
   HarnessRuntimeUpdater,
   compareVersions,
+  extractNpmRuntime,
   normalizeVersion,
   selectRuntimeAsset,
   runtimeVersion,

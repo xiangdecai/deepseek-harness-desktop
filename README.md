@@ -11,7 +11,7 @@ DeepSeek Harness Desktop 是官方 DeepSeek Harness Web UI 的 Windows 原生桌
 - 系统托盘提供显示窗口、浏览器打开、重启/重连、数据目录、日志目录和退出。
 - 使用官方 Harness 源码 `apps/web/public/favicon.svg` 的 DeepSeek 鱼形轮廓作为窗口、任务栏、托盘、快捷方式和 EXE 图标，并内置透明底多尺寸 Windows ICO。
 - 启动页采用居中品牌启动视图：实时状态、细进度线和服务地址默认简洁展示；启动日志收纳在可展开抽屉，失败时自动展开并提供重新启动。
-- 在“帮助 → 检查官方 Harness 更新”中检查 DeepSeek 官方 GitHub Release；只有带 Windows runtime archive 和 SHA-256 摘要的官方版本才允许安装，下载后使用独立 runtime 槽位，重启失败自动回滚。
+- 在“帮助 → 检查官方 Harness 更新”中优先检查 npm `@deepseek-ai/dsh` 的 `latest` 版本；安装包内置 Node.js 与 npm，在隔离 runtime 槽位执行 `npm install --omit=dev --ignore-scripts`，校验 npm integrity 后重启，失败自动回滚。GitHub Release runtime archive 作为备用来源。
 - 视觉证据模式拦截粘贴图片，调用 Windows OCR 获取文字和像素坐标；配置可选视觉模型后补充语义 JSON，再把 `xiangong.vision-evidence.v1` 证据插入输入框。
 
 ## 开发运行
@@ -65,9 +65,9 @@ npm.cmd run pack:win
 
 桌面应用不直接覆盖安装目录，也不会重建或删除 `%USERPROFILE%\\.dsh`。更新流程为：
 
-1. 从官方 GitHub Releases API 检查新版本。
-2. 下载官方 Windows runtime archive，并校验 GitHub 提供的 SHA-256 digest。
-3. 解压到 Electron `userData/runtime/harness-<version>`，验证 `lib/bin.js` 与 Web 前端后写入 pending 槽位。
+1. 从 npm registry 检查 `@deepseek-ai/dsh` 的 `dist-tags.latest` 和 tarball integrity。
+2. 下载官方 npm tarball，使用内置 Node/npm 在隔离目录安装生产依赖（不执行依赖脚本）。
+3. 解压或安装到 Electron `userData/runtime/harness-<version>`，验证 `lib/bin.js` 与 Web 前端后写入 pending 槽位。
 4. 停止并重启应用内 Harness；启动成功后将 pending 提升为 active，失败则删除新槽位并恢复旧 runtime。
 
-官方 Release 必须提供名称包含 `harness` 与 `runtime`（或 `win` / `windows`）的 `.tar.gz`、`.tgz` 或 `.zip` 资产，并带 `sha256:<64 hex>` digest。没有符合契约的资产时，应用只提示打开官方 Releases 页面，不会从网页源码或未经校验的压缩包更新。
+若 npm registry 暂时不可用，应用才检查官方 GitHub Release。Release 必须提供名称包含 `harness` 与 `runtime`（或 `win` / `windows`）的 `.tar.gz`、`.tgz` 或 `.zip` 资产，并带 `sha256:<64 hex>` digest。不会从网页源码或未经校验的压缩包更新。

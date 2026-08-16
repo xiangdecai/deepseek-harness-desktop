@@ -1,11 +1,36 @@
 'use strict'
 
 const { EventEmitter } = require('node:events')
-const { existsSync } = require('node:fs')
+const { existsSync, readFileSync } = require('node:fs')
 const { spawn } = require('node:child_process')
 const { createInterface } = require('node:readline')
 const path = require('node:path')
 const { probePort, resolvePortPolicy } = require('./port-policy.cjs')
+
+const BOOTSTRAP_ENV_NAMES = new Set([
+  'PATH', 'HOME', 'USERPROFILE', 'SHELL', 'NODE_OPTIONS', 'NODE_PATH',
+  'DEEPSEEK_BASE_URL', 'DEEPSEEK_SEARCH_BASE_URL', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_TLS_REJECT_UNAUTHORIZED',
+])
+
+function projectBootstrapEnvKeys(cwd) {
+  const file = path.join(cwd, '.env')
+  if (!existsSync(file)) return []
+  let content
+  try {
+    content = readFileSync(file, 'utf8')
+  } catch {
+    return []
+  }
+  const keys = []
+  for (const line of content.split(/\r?\n/u)) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(line)
+    if (!match) continue
+    const name = match[1].toUpperCase()
+    if (BOOTSTRAP_ENV_NAMES.has(name) || name.startsWith('DSH_') || name.startsWith('XDG_')) keys.push(match[1])
+  }
+  return [...new Set(keys)]
+}
 
 class HarnessServiceManager extends EventEmitter {
   constructor(options) {
@@ -36,6 +61,12 @@ class HarnessServiceManager extends EventEmitter {
 
   async start() {
     if (this.child !== undefined || this.mode === 'attached') return this.status
+    const bootstrapEnvKeys = projectBootstrapEnvKeys(this.cwd)
+    if (bootstrapEnvKeys.length > 0) {
+      const message = `Project .env contains Harness launch-only variable(s): ${bootstrapEnvKeys.join(', ')}. Remove them from ${path.join(this.cwd, '.env')} or set them in Windows environment variables before starting.`
+      this.logger.error(message)
+      throw new Error(message)
+    }
     const policy = await resolvePortPolicy(3080)
     if (policy.mode === 'attach') {
       this.mode = 'attached'
@@ -176,4 +207,3 @@ class HarnessServiceManager extends EventEmitter {
 }
 
 module.exports = { HarnessServiceManager }
-

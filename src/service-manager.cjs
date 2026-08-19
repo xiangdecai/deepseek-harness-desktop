@@ -42,11 +42,16 @@ class HarnessServiceManager extends EventEmitter {
     this.patchFiles = options.patchFiles ?? []
     this.logger = options.logger
     this.startupTimeoutMs = options.startupTimeoutMs ?? 45_000
+    this.requiredReadyProbes = options.requiredReadyProbes ?? 2
+    this.probe = options.probePort ?? probePort
+    this.wait = options.wait ?? (delayMs => new Promise(resolve => setTimeout(resolve, delayMs)))
     this.child = undefined
     this.url = undefined
     this.port = undefined
     this.mode = 'stopped'
     this.stopping = false
+    this.startPromise = undefined
+    this.restartPromise = undefined
   }
 
   get status() {
@@ -61,7 +66,18 @@ class HarnessServiceManager extends EventEmitter {
   }
 
   async start() {
+    if (this.startPromise) return await this.startPromise
     if (this.child !== undefined || this.mode === 'attached') return this.status
+    const startPromise = this.startInternal()
+    this.startPromise = startPromise
+    try {
+      return await startPromise
+    } finally {
+      if (this.startPromise === startPromise) this.startPromise = undefined
+    }
+  }
+
+  async startInternal() {
     const bootstrapEnvKeys = projectBootstrapEnvKeys(this.cwd)
     if (bootstrapEnvKeys.length > 0) {
       const message = `Project .env contains Harness launch-only variable(s): ${bootstrapEnvKeys.join(', ')}. Remove them from ${path.join(this.cwd, '.env')} or set them in Windows environment variables before starting.`
@@ -129,8 +145,24 @@ class HarnessServiceManager extends EventEmitter {
   }
 
   async restart() {
+    // During a cold boot, joining the existing start is safer than killing it mid-initialization.
+    if (this.startPromise) {
+      this.logger.info('Harness startup is already in progress; waiting for the existing launch.')
+      return await this.startPromise
+    }
+    if (this.restartPromise) return await this.restartPromise
+    const restartPromise = this.restartInternal()
+    this.restartPromise = restartPromise
+    try {
+      return await restartPromise
+    } finally {
+      if (this.restartPromise === restartPromise) this.restartPromise = undefined
+    }
+  }
+
+  async restartInternal() {
     if (this.mode === 'attached') {
-      const probe = await probePort(this.port)
+      const probe = await this.probe(this.port)
       if (probe.kind !== 'harness') {
         this.mode = 'stopped'
         this.url = undefined
@@ -190,11 +222,17 @@ class HarnessServiceManager extends EventEmitter {
 
   async waitUntilReady(child, port) {
     const startedAt = Date.now()
+    let consecutiveReadyProbes = 0
     while (Date.now() - startedAt < this.startupTimeoutMs) {
       if (child.exitCode !== null) throw new Error(`Harness exited before readiness with code ${child.exitCode}`)
-      const probe = await probePort(port, 600)
-      if (probe.kind === 'harness') return
-      await new Promise(resolve => setTimeout(resolve, 180))
+      const probe = await this.probe(port, 600)
+      if (probe.kind === 'harness') {
+        consecutiveReadyProbes += 1
+        if (consecutiveReadyProbes >= this.requiredReadyProbes) return
+      } else {
+        consecutiveReadyProbes = 0
+      }
+      await this.wait(180)
     }
     throw new Error(`Harness did not become ready within ${this.startupTimeoutMs} ms`)
   }

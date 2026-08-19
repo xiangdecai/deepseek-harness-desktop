@@ -39,6 +39,7 @@ let desktopUpdatePrompted = false
 let displayPreferences = { textScale: DEFAULT_TEXT_SCALE }
 let pluginManager
 let deliverablesStatus
+let serviceRestartPromise
 
 function projectPath(...segments) {
   return path.join(__dirname, '..', ...segments)
@@ -104,7 +105,20 @@ async function showStartupPage(target = mainWindow) {
 
 async function showHarness() {
   if (!mainWindow || mainWindow.isDestroyed() || !service.url) return
-  await mainWindow.loadURL(service.url)
+  const targetUrl = service.url
+  if (mainWindow.webContents.getURL() !== targetUrl) {
+    try {
+      await mainWindow.loadURL(targetUrl)
+    } catch (error) {
+      // Electron reports ERR_ABORTED when the startup page navigation wins a race.
+      // A single retry is enough once the service startup has settled.
+      if (error.code !== 'ERR_ABORTED' || service.url !== targetUrl) throw error
+      await new Promise(resolve => setTimeout(resolve, 200))
+      if (mainWindow && !mainWindow.isDestroyed() && service.url === targetUrl && mainWindow.webContents.getURL() !== targetUrl) {
+        await mainWindow.loadURL(targetUrl)
+      }
+    }
+  }
   mainWindow.setTitle('DeepSeek Harness Desktop')
   mainWindow.show()
 }
@@ -163,15 +177,24 @@ function sendLog(record) {
 }
 
 async function restartService() {
-  await showStartupPage()
+  if (serviceRestartPromise) return await serviceRestartPromise
+  const restartPromise = (async () => {
+    await showStartupPage()
+    try {
+      await service.restart()
+      await showHarness()
+      buildMenus()
+      return service.status
+    } catch (error) {
+      logger.error(`Restart failed: ${error.message}`)
+      throw error
+    }
+  })()
+  serviceRestartPromise = restartPromise
   try {
-    await service.restart()
-    await showHarness()
-    buildMenus()
-    return service.status
-  } catch (error) {
-    logger.error(`Restart failed: ${error.message}`)
-    throw error
+    return await restartPromise
+  } finally {
+    if (serviceRestartPromise === restartPromise) serviceRestartPromise = undefined
   }
 }
 

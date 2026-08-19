@@ -24,6 +24,7 @@
         <button class="tab" data-tab="market" role="tab" aria-selected="false">插件市场</button>
         <button class="tab" data-tab="updates" role="tab" aria-selected="false">更新</button>
         <button class="tab" data-tab="permissions" role="tab" aria-selected="false">权限与数据</button>
+        <button class="tab" data-tab="diagnostics" role="tab" aria-selected="false">诊断</button>
       </nav>
       <section id="installed" class="tab-panel active" role="tabpanel">
         <div id="categories" class="categories"></div>
@@ -31,17 +32,22 @@
       </section>
       <section id="market" class="tab-panel" role="tabpanel">
         <h2>插件市场</h2>
-        <p>第三方插件继续由 Harness 官方市场管理。安装前请查看来源、版本兼容性和权限声明。</p>
+        <p>第三方插件由 Harness 官方市场统一安装与更新。进入 Harness 设置中的“插件市场”即可浏览社区插件。</p>
         <p>桌面端不会预装社区插件，也不会赋予插件工程业务写权限。</p>
       </section>
       <section id="updates" class="tab-panel" role="tabpanel">
         <h2>更新边界</h2>
-        <p>桌面应用从 GitHub Releases 更新；Harness 运行时从 npm 官方包更新；插件在此处单独核验。</p>
+        <p>桌面应用从 GitHub Releases 更新，Harness 运行时从 npm 官方包更新，社区插件则由官方市场维护。</p>
         <p>升级 Harness 前，桌面端会备份插件清单、配置和 Cordis patch；不兼容插件不会被自动卸载。</p>
       </section>
       <section id="permissions" class="tab-panel" role="tabpanel">
         <h2>权限与数据</h2>
         <p id="protected"></p>
+        <p>请在安装插件前确认其文件、网络与凭据访问范围。项工AI工程写操作不会因为安装插件而自动授予。</p>
+      </section>
+      <section id="diagnostics" class="tab-panel" role="tabpanel">
+        <h2>诊断</h2>
+        <p>检查用户 Cordis 配置中已知的重复 loader、缺失入口与 BOM 风险。</p>
         <div id="findings" class="findings"></div>
       </section>
       <p id="notice" class="notice" aria-live="polite"></p>

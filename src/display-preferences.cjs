@@ -3,7 +3,7 @@
 const { mkdir, readFile, writeFile } = require('node:fs/promises')
 const path = require('node:path')
 
-const DEFAULT_WINDOW_BOUNDS = Object.freeze({ width: 1280, height: 860 })
+const DEFAULT_WINDOW_BOUNDS = Object.freeze({ width: 1120, height: 690 })
 const DEFAULT_TEXT_SCALE = 1
 const TEXT_SCALES = Object.freeze([0.85, 0.95, 1, 1.1, 1.2, 1.35, 1.5])
 

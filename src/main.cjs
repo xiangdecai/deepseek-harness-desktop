@@ -435,10 +435,9 @@ function buildMenus() {
       ],
     },
     {
-      label: '插件',
+      label: '插件中心',
       submenu: [
-        { label: '插件中心', click: createPluginCenter },
-        { label: '备份插件配置', click: () => void pluginManager.backup('manual') },
+        { label: '打开插件中心', accelerator: 'CommandOrControl+Shift+P', click: createPluginCenter },
       ],
     },
     {
@@ -475,6 +474,7 @@ function buildMenus() {
     { label: '在浏览器中打开', click: openBrowser, enabled: Boolean(service.url) },
     { label: '重启 / 重新连接', click: restart },
     { label: '查看启动日志', click: createLogWindow },
+    { label: '插件中心', click: createPluginCenter },
     { label: '打开数据目录', click: openData },
     { label: '打开日志目录', click: openLogs },
     { label: '粘贴图片生成视觉证据', type: 'checkbox', checked: visionEnabled, click: toggleVision },

@@ -11,10 +11,10 @@ header p, .tab-panel > p { margin-top: 8px; color: #737985; font-size: 13px; lin
 button { min-height: 32px; border: 1px solid #d9dde5; border-radius: 6px; padding: 0 12px; color: #263246; background: #ffffff; font: 13px inherit; cursor: pointer; }
 button:hover { border-color: #627bf2; color: #3556db; }
 button.quiet { border-color: transparent; color: #68707d; }
-nav { display: flex; gap: 20px; border-bottom: 1px solid #e8eaed; }
+nav { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid #e8eaed; }
 .tab { min-height: 46px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 2px; color: #68707d; }
 .tab.active { border-bottom-color: #4d6bfe; color: #274fe3; font-weight: 600; }
-.tab-panel { display: none; padding: 24px 0; }
+.tab-panel { display: none; min-height: 260px; padding: 24px 0; }
 .tab-panel.active { display: block; }
 .categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .categories span { border: 1px solid #e0e4ec; border-radius: 5px; padding: 5px 8px; color: #5c6470; font-size: 12px; }

@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Native Windows desktop carrier for the official DeepSeek Harness Web UI",
   "author": "Xiangong AI",
   "license": "MIT",
@@ -35,8 +35,7 @@
     "electronDist": "node_modules/electron/dist",
     "asar": true,
     "asarUnpack": [
-      "src/windows-ocr.ps1",
-      "src/config/desktop.cordis.patch.yml"
+      "src/windows-ocr.ps1"
     ],
     "files": [
       "src/**/*",

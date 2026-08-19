@@ -1,8 +1,0 @@
-# Desktop-owned overlay. Cordis refuses to rename an existing row, so disable
-# the official client row and add this package as a separate client row. The
-# host policy remains official, and the overlay never edits DSH_HOME.
-- id: ui-deliverables
-  disabled: true
-- insert:
-    - id: xiangong-ui-deliverables
-      name: '@xiangong/dsh-client-ui-deliverables'

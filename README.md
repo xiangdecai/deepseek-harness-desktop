@@ -54,8 +54,8 @@ npm.cmd run pack:win
 
 安装器和便携版输出到 `dist/`：
 
-- `DeepSeek-Harness-Desktop-Setup-0.2.0-x64.exe`
-- `DeepSeek-Harness-Desktop-Portable-0.2.0-x64.exe`
+- `DeepSeek-Harness-Desktop-Setup-0.2.1-x64.exe`
+- `DeepSeek-Harness-Desktop-Portable-0.2.1-x64.exe`
 
 2026-08-16 当前测试机实测：安装器 172.3 MB，便携版 172.1 MB；54.4 MB 的 Harness closure 首次展开耗时 21.75 秒，干净首次启动至 UI 可访问共约 51.7 秒，runtime 与测试数据均已初始化后的热启动约 2.94 秒。首次展开后固定 runtime 位于 Electron `userData/runtime/`，升级版本使用独立目录，不读取系统 Node 或 `dsh`。
 

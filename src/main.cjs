@@ -55,11 +55,6 @@ function ocrScriptPath() {
   return app.isPackaged ? script.replace('app.asar', 'app.asar.unpacked') : script
 }
 
-function desktopCordisPatchPath() {
-  const patch = path.join(app.getAppPath(), 'src', 'config', 'desktop.cordis.patch.yml')
-  return app.isPackaged ? patch.replace('app.asar', 'app.asar.unpacked') : patch
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: DEFAULT_WINDOW_BOUNDS.width,
@@ -212,8 +207,9 @@ async function installHarnessUpdate(update) {
     serviceStopped = true
     runtimePath = installed.path
     runtimeVersionValue = installed.version
-    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger)
+    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
     service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+    service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
     await showHarness()
@@ -532,17 +528,18 @@ async function boot() {
   })
   runtimeUpdater = new HarnessRuntimeUpdater({
     userData: app.getPath('userData'), logger, nodeExecutable, npmCli,
-    patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger),
+    patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger, dshHome),
   })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
-  deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger)
+  deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, dshHome)
   if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable: ${deliverablesStatus.reason}`, 'plugins')
   runtimeVersionValue = runtimeVersion(runtimePath) || runtimeVersion(fallbackRuntimePath)
   const dshEntry = !app.isPackaged && process.env.DHD_DSH_ENTRY
     ? path.resolve(process.env.DHD_DSH_ENTRY)
     : path.join(runtimePath, 'lib', 'bin.js')
   service = new HarnessServiceManager({
-    nodeExecutable, dshEntry, dshHome, cwd: workspace, logger, patchFiles: [desktopCordisPatchPath()],
+    nodeExecutable, dshEntry, dshHome, cwd: workspace, logger,
+    patchFiles: deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : [],
   })
   vision = new VisionBridge({ cacheDirectory, scriptPath: ocrScriptPath(), logger })
   service.on('exit', ({ expected }) => {

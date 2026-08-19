@@ -10,8 +10,12 @@ DeepSeek Harness Desktop 是官方 DeepSeek Harness Web UI 的 Windows 原生桌
 - 启动页显示实时日志，完整日志写入 Electron `userData/logs/desktop.log`。
 - 系统托盘提供显示窗口、浏览器打开、重启/重连、数据目录、日志目录和退出。
 - 使用官方 Harness 源码 `apps/web/public/favicon.svg` 的 DeepSeek 鱼形轮廓作为窗口、任务栏、托盘、快捷方式和 EXE 图标，并内置透明底多尺寸 Windows ICO。
+- 默认窗口为 1280 x 860 的桌面工作尺寸；“视图 → 聊天文字大小”提供缩小、恢复默认与放大，支持 `Ctrl+-`、`Ctrl+0`、`Ctrl+=`，并记住选择。
 - 启动页采用居中品牌启动视图：实时状态、细进度线和服务地址默认简洁展示；启动日志收纳在可展开抽屉，失败时自动展开并提供重新启动。
 - 在“帮助 → 检查官方 Harness 更新”中优先检查 npm `@deepseek-ai/dsh` 的 `latest` 版本；安装包内置 Node.js 与 npm，在隔离 runtime 槽位执行 `npm install --omit=dev --ignore-scripts`，校验 npm integrity 后重启，失败自动回滚。GitHub Release runtime archive 作为备用来源。
+- 安装版每天后台检查 `xiangdecai/deepseek-harness-desktop` 的 GitHub Releases，只提示、不自动下载；在“帮助 → 检查桌面应用更新”确认下载后显示进度。Portable 版明确提示手动替换，不尝试自更新。
+- “插件 → 插件中心”提供已安装项、类别、版本、兼容性、来源及权限查看；运行时升级前会备份 DSH_HOME 的插件清单、profile 配置和 Cordis patch，并诊断重复 loader、空入口与 BOM。
+- 内置 `@xiangong/dsh-client-ui-deliverables` Cordis 覆盖层：最终回答中的交付物路径可点击打开，消息尾部文件芯片可直接打开文件或其公共父目录。插件不授予模型文件写权限，路径打开仍由 Harness 的 loopback/host capability 守卫。
 - 视觉证据模式拦截粘贴图片，调用 Windows OCR 获取文字和像素坐标；配置可选视觉模型后补充语义 JSON，再把 `xiangong.vision-evidence.v1` 证据插入输入框。
 
 ## 开发运行
@@ -50,8 +54,8 @@ npm.cmd run pack:win
 
 安装器和便携版输出到 `dist/`：
 
-- `DeepSeek-Harness-Desktop-Setup-0.1.1-x64.exe`
-- `DeepSeek-Harness-Desktop-Portable-0.1.1-x64.exe`
+- `DeepSeek-Harness-Desktop-Setup-0.2.0-x64.exe`
+- `DeepSeek-Harness-Desktop-Portable-0.2.0-x64.exe`
 
 2026-08-16 当前测试机实测：安装器 172.3 MB，便携版 172.1 MB；54.4 MB 的 Harness closure 首次展开耗时 21.75 秒，干净首次启动至 UI 可访问共约 51.7 秒，runtime 与测试数据均已初始化后的热启动约 2.94 秒。首次展开后固定 runtime 位于 Electron `userData/runtime/`，升级版本使用独立目录，不读取系统 Node 或 `dsh`。
 
@@ -60,6 +64,17 @@ npm.cmd run pack:win
 升级安装会覆盖桌面程序文件，但不会删除或重置 `%USERPROFILE%\\.dsh`、Electron `userData`、会话密钥、插件配置、记忆和 runtime 更新槽位。卸载也不会主动清理这些用户数据；如需彻底清除，必须由用户手动删除对应数据目录。
 
 本项目是独立桌面产品，不替换项工AI的生产 AgentRuntime，也不改变 A3。
+
+## 桌面应用更新发布
+
+安装版通过 Electron 的 NSIS 更新通道读取本仓库 GitHub Release。发布者在已准备 runtime 的 Windows 环境中设置 `GH_TOKEN`，然后运行：
+
+```powershell
+npm.cmd test
+npm.cmd run pack:win -- --publish always
+```
+
+Release 必须同时上传 Setup `.exe`、`latest.yml` 与对应 `.blockmap`，以便已有安装版下载并校验更新。应用更新失败会保留现有版本和全部用户数据；Portable 版没有后台更新能力。
 
 ## 官方 Harness 更新
 

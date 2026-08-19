@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('harnessDesktop', {
   openBrowser: () => ipcRenderer.invoke('desktop:open-browser'),
   openDataDirectory: () => ipcRenderer.invoke('desktop:open-data-directory'),
   openLogDirectory: () => ipcRenderer.invoke('desktop:open-log-directory'),
+  checkAppUpdate: () => ipcRenderer.invoke('desktop:check-app-update'),
+  getPluginInventory: () => ipcRenderer.invoke('desktop:get-plugin-inventory'),
+  backupPluginState: () => ipcRenderer.invoke('desktop:backup-plugin-state'),
+  openPluginBackups: () => ipcRenderer.invoke('desktop:open-plugin-backups'),
   onLog: callback => {
     const listener = (_event, record) => callback(record)
     ipcRenderer.on('desktop:log', listener)
@@ -17,6 +21,11 @@ contextBridge.exposeInMainWorld('harnessDesktop', {
     const listener = (_event, progress) => callback(progress)
     ipcRenderer.on('desktop:update-progress', listener)
     return () => ipcRenderer.removeListener('desktop:update-progress', listener)
+  },
+  onAppUpdateProgress: callback => {
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on('desktop:app-update-progress', listener)
+    return () => ipcRenderer.removeListener('desktop:app-update-progress', listener)
   },
 })
 

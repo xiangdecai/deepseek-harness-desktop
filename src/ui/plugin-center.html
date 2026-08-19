@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+    <title>插件中心</title>
+    <link rel="stylesheet" href="plugin-center.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>插件中心</h1>
+          <p id="runtime">正在读取运行时信息</p>
+        </div>
+        <div class="actions">
+          <button id="backup" type="button">备份插件配置</button>
+          <button id="open-backups" class="quiet" type="button">打开备份目录</button>
+        </div>
+      </header>
+      <nav role="tablist" aria-label="插件中心">
+        <button class="tab active" data-tab="installed" role="tab" aria-selected="true">已安装</button>
+        <button class="tab" data-tab="market" role="tab" aria-selected="false">插件市场</button>
+        <button class="tab" data-tab="updates" role="tab" aria-selected="false">更新</button>
+        <button class="tab" data-tab="permissions" role="tab" aria-selected="false">权限与数据</button>
+      </nav>
+      <section id="installed" class="tab-panel active" role="tabpanel">
+        <div id="categories" class="categories"></div>
+        <div id="plugins" class="plugin-list"></div>
+      </section>
+      <section id="market" class="tab-panel" role="tabpanel">
+        <h2>插件市场</h2>
+        <p>第三方插件继续由 Harness 官方市场管理。安装前请查看来源、版本兼容性和权限声明。</p>
+        <p>桌面端不会预装社区插件，也不会赋予插件工程业务写权限。</p>
+      </section>
+      <section id="updates" class="tab-panel" role="tabpanel">
+        <h2>更新边界</h2>
+        <p>桌面应用从 GitHub Releases 更新；Harness 运行时从 npm 官方包更新；插件在此处单独核验。</p>
+        <p>升级 Harness 前，桌面端会备份插件清单、配置和 Cordis patch；不兼容插件不会被自动卸载。</p>
+      </section>
+      <section id="permissions" class="tab-panel" role="tabpanel">
+        <h2>权限与数据</h2>
+        <p id="protected"></p>
+        <div id="findings" class="findings"></div>
+      </section>
+      <p id="notice" class="notice" aria-live="polite"></p>
+    </main>
+    <script src="plugin-center.js"></script>
+  </body>
+</html>

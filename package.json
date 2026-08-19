@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Native Windows desktop carrier for the official DeepSeek Harness Web UI",
   "author": "Xiangong AI",
   "license": "MIT",
@@ -26,13 +26,17 @@
     "sharp": "0.34.4",
     "ws": "^8.18.3"
   },
+  "dependencies": {
+    "electron-updater": "6.7.3"
+  },
   "build": {
     "appId": "ai.deepseek.harness.desktop",
     "productName": "DeepSeek Harness Desktop",
     "electronDist": "node_modules/electron/dist",
     "asar": true,
     "asarUnpack": [
-      "src/windows-ocr.ps1"
+      "src/windows-ocr.ps1",
+      "src/config/desktop.cordis.patch.yml"
     ],
     "files": [
       "src/**/*",
@@ -74,10 +78,21 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DeepSeek Harness Desktop",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
     },
     "portable": {
       "artifactName": "DeepSeek-Harness-Desktop-Portable-${version}-${arch}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xiangdecai",
+        "repo": "deepseek-harness-desktop"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.7.3"
   }
 }

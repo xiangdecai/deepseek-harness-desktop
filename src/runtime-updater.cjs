@@ -252,6 +252,7 @@ class HarnessRuntimeUpdater {
     this.logger = options.logger
     this.nodeExecutable = options.nodeExecutable
     this.npmCli = options.npmCli
+    this.patchRuntime = options.patchRuntime
     this.releaseUrl = options.releaseUrl ?? 'https://github.com/deepseek-ai/deepseek-harness/releases'
     this.apiUrl = options.apiUrl ?? RELEASES_API
   }
@@ -378,6 +379,10 @@ class HarnessRuntimeUpdater {
     if (!validRuntime(root, update.latestVersion)) {
       await removeWithRetry(staging)
       throw new Error(`Official runtime ${update.latestVersion} failed validation`)
+    }
+    const desktopPatch = await this.patchRuntime?.(root)
+    if (desktopPatch?.status === 'incompatible') {
+      this.logger?.warn(`Harness ${update.latestVersion} has an incompatible desktop deliverables extension: ${desktopPatch.reason}`, 'updater')
     }
     await rm(target, { recursive: true, force: true })
     await rename(root, target)

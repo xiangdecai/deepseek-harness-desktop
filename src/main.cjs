@@ -1,6 +1,7 @@
 'use strict'
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const { mkdirSync } = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -9,12 +10,19 @@ const { HarnessServiceManager } = require('./service-manager.cjs')
 const { ensureHarnessRuntime } = require('./runtime-loader.cjs')
 const { HarnessRuntimeUpdater, extractNpmRuntime, runtimeVersion } = require('./runtime-updater.cjs')
 const { VisionBridge } = require('./vision-bridge.cjs')
+const { DesktopAppUpdater } = require('./desktop-updater.cjs')
+const { applyDesktopDeliverablesPatch } = require('./desktop-deliverables.cjs')
+const { DesktopPluginManager } = require('./plugin-manager.cjs')
+const {
+  DEFAULT_WINDOW_BOUNDS, DEFAULT_TEXT_SCALE, nextTextScale, readDisplayPreferences, writeDisplayPreferences,
+} = require('./display-preferences.cjs')
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 
 let mainWindow
 let logWindow
+let pluginWindow
 let tray
 let logger
 let service
@@ -26,6 +34,11 @@ let runtimePath
 let fallbackRuntimePath
 let runtimeVersionValue = ''
 let updateInProgress = false
+let desktopUpdater
+let desktopUpdatePrompted = false
+let displayPreferences = { textScale: DEFAULT_TEXT_SCALE }
+let pluginManager
+let deliverablesStatus
 
 function projectPath(...segments) {
   return path.join(__dirname, '..', ...segments)
@@ -42,12 +55,17 @@ function ocrScriptPath() {
   return app.isPackaged ? script.replace('app.asar', 'app.asar.unpacked') : script
 }
 
+function desktopCordisPatchPath() {
+  const patch = path.join(app.getAppPath(), 'src', 'config', 'desktop.cordis.patch.yml')
+  return app.isPackaged ? patch.replace('app.asar', 'app.asar.unpacked') : patch
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1220,
-    height: 820,
-    minWidth: 820,
-    minHeight: 600,
+    width: DEFAULT_WINDOW_BOUNDS.width,
+    height: DEFAULT_WINDOW_BOUNDS.height,
+    minWidth: 960,
+    minHeight: 680,
     show: false,
     backgroundColor: '#f7f8fa',
     icon: projectPath('assets', 'icon.png'),
@@ -59,6 +77,7 @@ function createWindow() {
       sandbox: true,
     },
   })
+  mainWindow.webContents.setZoomFactor(displayPreferences.textScale)
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('close', event => {
     if (quitting) return
@@ -74,6 +93,13 @@ function createWindow() {
     event.preventDefault()
     if (/^https?:/iu.test(url)) void shell.openExternal(url)
   })
+}
+
+async function setChatTextScale(textScale) {
+  displayPreferences = await writeDisplayPreferences(app.getPath('userData'), { textScale })
+  mainWindow?.webContents.setZoomFactor(displayPreferences.textScale)
+  logger?.info(`Chat text scale set to ${Math.round(displayPreferences.textScale * 100)}%.`, 'display')
+  buildMenus()
 }
 
 async function showStartupPage(target = mainWindow) {
@@ -113,6 +139,28 @@ function createLogWindow() {
   logWindow.on('closed', () => { logWindow = undefined })
 }
 
+function createPluginCenter() {
+  if (pluginWindow && !pluginWindow.isDestroyed()) {
+    pluginWindow.show()
+    pluginWindow.focus()
+    return
+  }
+  pluginWindow = new BrowserWindow({
+    width: 980,
+    height: 720,
+    minWidth: 720,
+    minHeight: 520,
+    title: 'DeepSeek Harness Desktop - 插件中心',
+    parent: mainWindow,
+    icon: projectPath('assets', 'icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true,
+    },
+  })
+  void pluginWindow.loadFile(path.join(__dirname, 'ui', 'plugin-center.html'))
+  pluginWindow.on('closed', () => { pluginWindow = undefined })
+}
+
 function sendLog(record) {
   for (const window of [mainWindow, logWindow]) {
     if (window && !window.isDestroyed()) window.webContents.send('desktop:log', record)
@@ -149,6 +197,7 @@ async function installHarnessUpdate(update) {
   const previousVersion = runtimeVersionValue
   let serviceStopped = false
   try {
+    await pluginManager.backup('before-harness-update')
     await showStartupPage()
     mainWindow?.webContents.send('desktop:update-progress', {
       phase: 'prepare', percent: 0, message: `正在准备 Harness ${update.latestVersion} 更新`,
@@ -163,6 +212,7 @@ async function installHarnessUpdate(update) {
     serviceStopped = true
     runtimePath = installed.path
     runtimeVersionValue = installed.version
+    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger)
     service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
@@ -241,6 +291,91 @@ async function checkHarnessUpdate() {
   if (answer.response === 0) void shell.openExternal(result.releaseUrl)
 }
 
+function publishDesktopUpdate(status) {
+  if (status.status === 'downloading') {
+    const fraction = Number.isFinite(status.percent) ? status.percent / 100 : 2
+    mainWindow?.setProgressBar(fraction)
+    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    return
+  }
+  if (status.status === 'downloaded') {
+    mainWindow?.setProgressBar(-1)
+    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    void dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '桌面应用更新已就绪',
+      message: `DeepSeek Harness Desktop ${status.version} 已下载。`,
+      detail: '关闭并安装不会清理 DSH_HOME 中的会话、密钥、插件或记忆。',
+      buttons: ['立即安装', '下次启动时安装'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(answer => {
+      if (answer.response === 0) desktopUpdater?.install()
+    })
+    return
+  }
+  if (status.status === 'available') {
+    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    if (!desktopUpdatePrompted) {
+      desktopUpdatePrompted = true
+      new Notification({
+        title: 'DeepSeek Harness Desktop 有新版本',
+        body: `${status.version} 已可下载。可在“帮助”中安装。`,
+      }).show()
+    }
+    return
+  }
+  if (status.status === 'error') {
+    mainWindow?.setProgressBar(-1)
+    mainWindow?.webContents.send('desktop:app-update-progress', status)
+  }
+}
+
+async function checkDesktopUpdate({ manual = true } = {}) {
+  if (!desktopUpdater) return
+  const result = await desktopUpdater.check({ manual })
+  if (!manual) return
+  if (result.status === 'portable') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '便携版需手动更新',
+      message: 'Portable 版本不会自动替换正在运行的可执行文件。',
+      detail: '请从 GitHub Releases 下载新版本后替换原文件；DSH_HOME 数据不会受影响。',
+    })
+    return
+  }
+  if (result.status === 'disabled') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info', title: '开发模式不检查桌面更新', message: '打包后的 Setup 版本会从 GitHub Releases 检查更新。',
+    })
+    return
+  }
+  if (result.status === 'up-to-date') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info', title: '桌面应用已是最新版本', message: `当前版本：${app.getVersion()}`,
+    })
+    return
+  }
+  if (result.status === 'available') {
+    const answer = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现桌面应用更新',
+      message: `${app.getVersion()} → ${result.version}`,
+      detail: '下载完成后由安装程序替换应用。Harness 运行时、会话、密钥、插件和记忆保持原样。',
+      buttons: ['下载更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (answer.response === 0) await desktopUpdater.download()
+    return
+  }
+  if (result.status === 'error') {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning', title: '桌面应用更新检查失败', message: result.message, detail: '当前版本和全部用户数据已保持不变。',
+    })
+  }
+}
+
 function buildMenus() {
   const openBrowser = () => {
     if (service.url) void shell.openExternal(service.url)
@@ -281,12 +416,24 @@ function buildMenus() {
       ],
     },
     {
+      label: '插件',
+      submenu: [
+        { label: '插件中心', click: createPluginCenter },
+        { label: '备份插件配置', click: () => void pluginManager.backup('manual') },
+      ],
+    },
+    {
       label: '视图',
       submenu: [
         { role: 'reload', label: '重新加载界面' },
-        { role: 'resetZoom', label: '重置缩放' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
+        {
+          label: `聊天文字大小 (${Math.round(displayPreferences.textScale * 100)}%)`,
+          submenu: [
+            { label: '缩小', accelerator: 'CommandOrControl+-', click: () => void setChatTextScale(nextTextScale(displayPreferences.textScale, -1)) },
+            { label: '恢复默认', accelerator: 'CommandOrControl+0', click: () => void setChatTextScale(DEFAULT_TEXT_SCALE) },
+            { label: '放大', accelerator: 'CommandOrControl+=', click: () => void setChatTextScale(nextTextScale(displayPreferences.textScale, 1)) },
+          ],
+        },
         { role: 'togglefullscreen', label: '全屏' },
       ],
     },
@@ -294,6 +441,7 @@ function buildMenus() {
       label: '帮助',
       submenu: [
         { label: 'DeepSeek Harness 项目', click: () => void shell.openExternal('https://github.com/deepseek-ai/deepseek-harness') },
+        { label: '检查桌面应用更新', click: () => void checkDesktopUpdate({ manual: true }) },
         { label: '检查官方 Harness 更新', click: () => void checkHarnessUpdate() },
         { label: '关于', click: () => app.showAboutPanel() },
       ],
@@ -336,6 +484,11 @@ function registerIpc() {
   ipcMain.handle('desktop:open-browser', () => service.url ? shell.openExternal(service.url) : undefined)
   ipcMain.handle('desktop:open-data-directory', () => shell.openPath(service.dshHome))
   ipcMain.handle('desktop:open-log-directory', () => shell.openPath(path.dirname(logger.filePath)))
+  ipcMain.handle('desktop:check-app-update', () => checkDesktopUpdate({ manual: true }))
+  ipcMain.handle('desktop:set-chat-text-scale', (_event, textScale) => setChatTextScale(textScale))
+  ipcMain.handle('desktop:get-plugin-inventory', () => pluginManager.inventory({ runtimePath, runtimeVersion: runtimeVersionValue, deliverables: deliverablesStatus }))
+  ipcMain.handle('desktop:backup-plugin-state', () => pluginManager.backup('manual'))
+  ipcMain.handle('desktop:open-plugin-backups', () => shell.openPath(pluginManager.backupDirectory()))
   ipcMain.handle('vision:is-enabled', () => visionEnabled)
   ipcMain.handle('vision:analyze', (_event, payload) => vision.analyze(payload))
 }
@@ -360,6 +513,16 @@ async function boot() {
 
   logger = new AppLogger(logDirectory)
   logger.on('record', sendLog)
+  pluginManager = new DesktopPluginManager({ dshHome, userData: app.getPath('userData'), logger })
+  displayPreferences = await readDisplayPreferences(app.getPath('userData'))
+  desktopUpdater = new DesktopAppUpdater({
+    autoUpdater,
+    userData: app.getPath('userData'),
+    isPackaged: app.isPackaged,
+    logger,
+    onStatus: publishDesktopUpdate,
+  })
+  desktopUpdater.configure()
   fallbackRuntimePath = await ensureHarnessRuntime({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -367,13 +530,20 @@ async function boot() {
     developmentRuntime: bundledPath('harness'),
     logger,
   })
-  runtimeUpdater = new HarnessRuntimeUpdater({ userData: app.getPath('userData'), logger, nodeExecutable, npmCli })
+  runtimeUpdater = new HarnessRuntimeUpdater({
+    userData: app.getPath('userData'), logger, nodeExecutable, npmCli,
+    patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger),
+  })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
+  deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger)
+  if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable: ${deliverablesStatus.reason}`, 'plugins')
   runtimeVersionValue = runtimeVersion(runtimePath) || runtimeVersion(fallbackRuntimePath)
   const dshEntry = !app.isPackaged && process.env.DHD_DSH_ENTRY
     ? path.resolve(process.env.DHD_DSH_ENTRY)
     : path.join(runtimePath, 'lib', 'bin.js')
-  service = new HarnessServiceManager({ nodeExecutable, dshEntry, dshHome, cwd: workspace, logger })
+  service = new HarnessServiceManager({
+    nodeExecutable, dshEntry, dshHome, cwd: workspace, logger, patchFiles: [desktopCordisPatchPath()],
+  })
   vision = new VisionBridge({ cacheDirectory, scriptPath: ocrScriptPath(), logger })
   service.on('exit', ({ expected }) => {
     buildMenus()
@@ -385,6 +555,8 @@ async function boot() {
   registerIpc()
   await showStartupPage()
   logger.info(`DeepSeek Harness Desktop ${app.getVersion()} starting.`)
+  setTimeout(() => { void checkDesktopUpdate({ manual: false }) }, 10_000)
+  setInterval(() => { void checkDesktopUpdate({ manual: false }) }, 6 * 60 * 60 * 1000).unref()
   try {
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)

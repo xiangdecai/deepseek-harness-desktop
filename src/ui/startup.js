@@ -68,8 +68,36 @@ function renderUpdateProgress(progress = {}) {
   logDrawer.open = true
 }
 
+function renderAppUpdateProgress(progress = {}) {
+  if (progress.status === 'available') return
+  if (progress.status === 'downloaded') {
+    statusLine.className = 'status-line update'
+    statusLine.textContent = '桌面应用更新已就绪'
+    statusDetail.textContent = `${progress.version} 已下载，等待安装`
+    progressTrack.className = 'progress-track ready'
+    progressTrack.querySelector('span').style.width = '100%'
+    return
+  }
+  if (progress.status === 'error') {
+    statusLine.className = 'status-line error'
+    statusLine.textContent = '桌面应用更新失败'
+    statusDetail.textContent = progress.message || '当前版本保持不变'
+    progressTrack.className = 'progress-track error'
+    return
+  }
+  if (progress.status === 'downloading') {
+    const percent = Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : 0
+    statusLine.className = 'status-line update'
+    statusLine.textContent = '正在下载桌面应用更新'
+    statusDetail.textContent = `${percent}%`
+    progressTrack.className = 'progress-track update'
+    progressTrack.querySelector('span').style.width = `${percent}%`
+  }
+}
+
 async function initialize() {
   window.harnessDesktop.onUpdateProgress(renderUpdateProgress)
+  window.harnessDesktop.onAppUpdateProgress(renderAppUpdateProgress)
   const state = await window.harnessDesktop.getState()
   let lastMessage = ''
   state.logs.forEach(record => { lastMessage = addLog(record) })

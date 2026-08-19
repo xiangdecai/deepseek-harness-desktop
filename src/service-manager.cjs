@@ -39,6 +39,7 @@ class HarnessServiceManager extends EventEmitter {
     this.dshEntry = options.dshEntry
     this.dshHome = options.dshHome
     this.cwd = options.cwd
+    this.patchFiles = options.patchFiles ?? []
     this.logger = options.logger
     this.startupTimeoutMs = options.startupTimeoutMs ?? 45_000
     this.child = undefined
@@ -92,7 +93,10 @@ class HarnessServiceManager extends EventEmitter {
     this.logger.info(`DSH_HOME=${this.dshHome}`)
     this.logger.info(`Workspace=${this.cwd}`)
 
-    const child = spawn(this.nodeExecutable, [this.dshEntry, 'web', '--port', String(port)], {
+    const args = [this.dshEntry, 'web']
+    for (const patch of this.patchFiles) args.push('--patch', patch)
+    args.push('--port', String(port))
+    const child = spawn(this.nodeExecutable, args, {
       cwd: this.cwd,
       env: {
         ...process.env,

@@ -246,6 +246,22 @@ function releaseVersion(release) {
   return normalizeVersion(release?.tag_name || release?.name)
 }
 
+function selectNpmRuntime(metadata) {
+  const tags = metadata?.['dist-tags']
+  const versions = metadata?.versions
+  if (!tags || !versions) return undefined
+
+  // Harness is currently published as release candidates. npm keeps the next
+  // release candidate under `next` while `latest` can remain on the prior RC.
+  const candidates = ['latest', 'next']
+    .map(tag => ({ tag, version: normalizeVersion(tags[tag]) }))
+    .filter(candidate => candidate.version && versions[candidate.version]?.dist?.tarball && versions[candidate.version]?.dist?.integrity)
+    .map(candidate => ({ ...candidate, info: versions[candidate.version] }))
+
+  candidates.sort((left, right) => compareVersions(right.version, left.version))
+  return candidates[0]
+}
+
 class HarnessRuntimeUpdater {
   constructor(options) {
     this.userData = options.userData
@@ -261,15 +277,17 @@ class HarnessRuntimeUpdater {
     try {
       const npmResponse = await request(NPM_REGISTRY_API)
       const metadata = JSON.parse(npmResponse.body)
-      const latestVersion = normalizeVersion(metadata['dist-tags']?.latest)
-      const versionInfo = metadata.versions?.[latestVersion]
+      const runtime = selectNpmRuntime(metadata)
+      const latestVersion = runtime?.version
+      const versionInfo = runtime?.info
       if (latestVersion && compareVersions(latestVersion, currentVersion) <= 0) {
-        return { status: 'up-to-date', source: 'npm', currentVersion, latestVersion, releaseUrl: this.releaseUrl }
+        return { status: 'up-to-date', source: 'npm', channel: runtime.tag, currentVersion, latestVersion, releaseUrl: this.releaseUrl }
       }
       if (latestVersion && versionInfo?.dist?.tarball && versionInfo?.dist?.integrity) {
         return {
           status: 'update-available',
           source: 'npm',
+          channel: runtime.tag,
           currentVersion,
           latestVersion,
           releaseUrl: `https://www.npmjs.com/package/${NPM_PACKAGE}`,
@@ -474,6 +492,7 @@ module.exports = {
   compareVersions,
   extractNpmRuntime,
   normalizeVersion,
+  selectNpmRuntime,
   selectRuntimeAsset,
   runtimeVersion,
 }

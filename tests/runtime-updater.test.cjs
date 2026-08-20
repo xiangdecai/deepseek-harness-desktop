@@ -8,6 +8,7 @@ const test = require('node:test')
 const {
   HarnessRuntimeUpdater,
   compareVersions,
+  selectNpmRuntime,
   selectRuntimeAsset,
 } = require('../src/runtime-updater.cjs')
 
@@ -33,6 +34,21 @@ test('selectRuntimeAsset only accepts named runtime archives', () => {
   assert.equal(asset.name, 'deepseek-harness-runtime-win-x64.tar.gz')
 })
 
+test('selectNpmRuntime promotes the newer official next release candidate', () => {
+  const runtime = selectNpmRuntime({
+    'dist-tags': { latest: '0.1.0-rc.7', next: '0.1.0-rc.8' },
+    versions: {
+      '0.1.0-rc.7': { dist: { tarball: 'https://example.test/rc.7.tgz', integrity: 'sha512-rc7' } },
+      '0.1.0-rc.8': { dist: { tarball: 'https://example.test/rc.8.tgz', integrity: 'sha512-rc8' } },
+    },
+  })
+  assert.deepEqual(runtime, {
+    tag: 'next',
+    version: '0.1.0-rc.8',
+    info: { dist: { tarball: 'https://example.test/rc.8.tgz', integrity: 'sha512-rc8' } },
+  })
+})
+
 test('pending runtime is selected once and rolled back after a failed boot', async () => {
   const userData = await mkdtemp(path.join(os.tmpdir(), 'dhd-updater-'))
   const fallback = path.join(userData, 'fallback')
@@ -51,4 +67,3 @@ test('pending runtime is selected once and rolled back after a failed boot', asy
     await rm(userData, { recursive: true, force: true })
   }
 })
-

@@ -44,6 +44,7 @@
       "LICENSE",
       "THIRD_PARTY_NOTICES.md",
       "DESKTOP_THIRD_PARTY_NOTICES.md",
+      "PNPM_THIRD_PARTY_NOTICES.md",
       "package.json"
     ],
     "extraResources": [

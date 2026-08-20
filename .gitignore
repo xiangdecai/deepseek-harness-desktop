@@ -1,6 +1,8 @@
 node_modules/
 .downloads/
 dist/
+!resources/pnpm-runtime/pnpm/dist/
+!resources/pnpm-runtime/pnpm/dist/pnpm.cjs
 release/
 resources/node/*
 resources/harness/*

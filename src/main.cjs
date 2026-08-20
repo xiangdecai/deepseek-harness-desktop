@@ -317,6 +317,9 @@ function publishDesktopUpdate(status) {
   if (status.status === 'downloading') {
     const fraction = Number.isFinite(status.percent) ? status.percent / 100 : 2
     mainWindow?.setProgressBar(fraction)
+    // The Harness page has no desktop update surface. Show the native startup
+    // page so the user can see the transfer instead of only a taskbar hint.
+    void showStartupPage()
     mainWindow?.webContents.send('desktop:app-update-progress', status)
     return
   }
@@ -333,6 +336,7 @@ function publishDesktopUpdate(status) {
       cancelId: 1,
     }).then(answer => {
       if (answer.response === 0) desktopUpdater?.install()
+      else void showHarness()
     })
     return
   }
@@ -501,6 +505,7 @@ function registerIpc() {
     logs: logger.snapshot(),
     logFile: logger.filePath,
     visionEnabled,
+    appUpdate: desktopUpdater?.status,
   }))
   ipcMain.handle('desktop:restart', restartService)
   ipcMain.handle('desktop:open-browser', () => service.url ? shell.openExternal(service.url) : undefined)

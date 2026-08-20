@@ -54,6 +54,7 @@ test('selectNpmRuntime promotes the newer official next release candidate', () =
 test('pnpm runtime installs use an isolated production closure', () => {
   const args = pnpmInstallArguments('C:/runtime/staging', 'C:/runtime/dsh.tgz')
   assert.deepEqual(args.slice(0, 6), ['add', '--dir', 'C:/runtime/staging', '--prod', '--ignore-scripts', '--no-lockfile'])
+  assert.ok(args.includes('--config.node-linker=hoisted'))
   assert.equal(args.at(-1), 'C:/runtime/dsh.tgz')
 })
 

@@ -70,6 +70,8 @@ function renderUpdateProgress(progress = {}) {
 
 function renderAppUpdateProgress(progress = {}) {
   if (progress.status === 'available') return
+  if (progress.status === 'idle') return
+  updateMode = true
   if (progress.status === 'downloaded') {
     statusLine.className = 'status-line update'
     statusLine.textContent = '桌面应用更新已就绪'
@@ -101,7 +103,8 @@ async function initialize() {
   const state = await window.harnessDesktop.getState()
   let lastMessage = ''
   state.logs.forEach(record => { lastMessage = addLog(record) })
-  renderStatus(state.service, lastMessage)
+  if (state.appUpdate?.status && state.appUpdate.status !== 'idle') renderAppUpdateProgress(state.appUpdate)
+  else renderStatus(state.service, lastMessage)
   window.harnessDesktop.onLog(record => {
     lastMessage = addLog(record)
     void window.harnessDesktop.getState().then(next => renderStatus(next.service, lastMessage))

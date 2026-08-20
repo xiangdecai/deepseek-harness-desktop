@@ -456,7 +456,10 @@ class HarnessRuntimeUpdater {
 
 function pnpmInstallArguments(staging, archive) {
   return [
-    'add', '--dir', staging, '--prod', '--ignore-scripts', '--no-lockfile', archive,
+    // The Harness entry and its plugin modules use normal Node ESM resolution.
+    // Keep the runtime closure hoisted instead of relying on pnpm's virtual-store
+    // links, which are not preserved as a standalone carrier after staging moves.
+    'add', '--dir', staging, '--prod', '--ignore-scripts', '--no-lockfile', '--config.node-linker=hoisted', archive,
   ]
 }
 

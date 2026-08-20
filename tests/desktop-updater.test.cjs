@@ -47,6 +47,7 @@ test('setup updater checks, records state, and downloads only after an explicit 
     await updater.download()
     assert.equal(nativeUpdater.downloads, 1)
     assert.equal(events.some(event => event.status === 'downloaded'), true)
+    assert.deepEqual(updater.status, { status: 'downloaded', version: '0.2.0' })
   } finally {
     await rm(userData, { recursive: true, force: true })
   }

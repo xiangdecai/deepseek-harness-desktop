@@ -33,6 +33,7 @@ class DesktopAppUpdater {
     this.onStatus = options.onStatus
     this.checking = undefined
     this.latest = undefined
+    this.status = { status: 'idle' }
     this.configured = false
   }
 
@@ -114,6 +115,7 @@ class DesktopAppUpdater {
   }
 
   publish(status) {
+    this.status = { ...status }
     this.logger?.info(`Desktop update: ${status.status}${status.version ? ` ${status.version}` : ''}${status.message ? ` (${status.message})` : ''}.`, 'desktop-updater')
     this.onStatus?.(status)
   }

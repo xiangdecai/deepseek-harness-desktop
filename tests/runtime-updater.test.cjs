@@ -8,9 +8,11 @@ const test = require('node:test')
 const {
   HarnessRuntimeUpdater,
   compareVersions,
+  pnpmInstallArguments,
   selectNpmRuntime,
   selectRuntimeAsset,
 } = require('../src/runtime-updater.cjs')
+const { validRuntime } = require('../src/runtime-loader.cjs')
 
 async function makeRuntime(root, version) {
   await mkdir(path.join(root, 'lib'), { recursive: true })
@@ -47,6 +49,26 @@ test('selectNpmRuntime promotes the newer official next release candidate', () =
     version: '0.1.0-rc.8',
     info: { dist: { tarball: 'https://example.test/rc.8.tgz', integrity: 'sha512-rc8' } },
   })
+})
+
+test('pnpm runtime installs use an isolated production closure', () => {
+  const args = pnpmInstallArguments('C:/runtime/staging', 'C:/runtime/dsh.tgz')
+  assert.deepEqual(args.slice(0, 6), ['add', '--dir', 'C:/runtime/staging', '--prod', '--ignore-scripts', '--no-lockfile'])
+  assert.equal(args.at(-1), 'C:/runtime/dsh.tgz')
+})
+
+test('pnpm runtime layout is accepted when the direct frontend dependency is linked', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dhd-pnpm-runtime-'))
+  try {
+    await mkdir(path.join(root, 'lib'), { recursive: true })
+    await mkdir(path.join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib'), { recursive: true })
+    await writeFile(path.join(root, 'lib', 'bin.js'), "import '../node_modules/@deepseek-ai/dsh/lib/bin.js'\n", 'utf8')
+    await writeFile(path.join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), '', 'utf8')
+    await writeFile(path.join(root, 'desktop-runtime.json'), `${JSON.stringify({ harness_version: '0.1.0-rc.8' })}\n`, 'utf8')
+    assert.equal(validRuntime(root, '0.1.0-rc.8'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('pending runtime is selected once and rolled back after a failed boot', async () => {

@@ -8,7 +8,7 @@ const path = require('node:path')
 const { AppLogger } = require('./logger.cjs')
 const { HarnessServiceManager } = require('./service-manager.cjs')
 const { ensureHarnessRuntime } = require('./runtime-loader.cjs')
-const { HarnessRuntimeUpdater, extractNpmRuntime, runtimeVersion } = require('./runtime-updater.cjs')
+const { HarnessRuntimeUpdater, runtimeVersion } = require('./runtime-updater.cjs')
 const { VisionBridge } = require('./vision-bridge.cjs')
 const { DesktopAppUpdater } = require('./desktop-updater.cjs')
 const { applyDesktopDeliverablesPatch } = require('./desktop-deliverables.cjs')
@@ -248,7 +248,10 @@ async function installHarnessUpdate(update) {
     await runtimeUpdater.rollbackPending()
     runtimePath = previousRuntime
     runtimeVersionValue = previousVersion
+    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
+    if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable after rollback: ${deliverablesStatus.reason}`, 'plugins')
     service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+    service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
     if (serviceStopped) {
       try {
         await service.start()
@@ -527,7 +530,7 @@ async function boot() {
   const nodeExecutable = !app.isPackaged && process.env.DHD_NODE_EXECUTABLE
     ? path.resolve(process.env.DHD_NODE_EXECUTABLE)
     : bundledPath('node', 'node.exe')
-  const npmCli = await extractNpmRuntime(bundledPath('node', 'npm-runtime.tar.gz'), app.getPath('userData'), logger)
+  const pnpmCli = bundledPath('pnpm-runtime', 'pnpm', 'bin', 'pnpm.cjs')
   const workspace = process.env.DSH_CWD ? path.resolve(process.env.DSH_CWD) : os.homedir()
 
   logger = new AppLogger(logDirectory)
@@ -550,7 +553,7 @@ async function boot() {
     logger,
   })
   runtimeUpdater = new HarnessRuntimeUpdater({
-    userData: app.getPath('userData'), logger, nodeExecutable, npmCli,
+    userData: app.getPath('userData'), logger, nodeExecutable, pnpmCli,
     patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger, dshHome),
   })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
@@ -588,7 +591,10 @@ async function boot() {
     if (fallback || path.resolve(runtimePath) !== path.resolve(fallbackRuntimePath)) {
       runtimePath = fallback || fallbackRuntimePath
       runtimeVersionValue = runtimeVersion(runtimePath)
+      deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
+      if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable after startup fallback: ${deliverablesStatus.reason}`, 'plugins')
       service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
+      service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
       try {
         await service.start()
         await runtimeUpdater.markHealthy(runtimePath)

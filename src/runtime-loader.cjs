@@ -43,7 +43,8 @@ function validRuntime(directory, version) {
   const marker = path.join(directory, 'desktop-runtime.json')
   const entry = path.join(directory, 'lib', 'bin.js')
   const frontend = path.join(directory, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'index.html')
-  if (!existsSync(marker) || !existsSync(entry) || !existsSync(frontend)) return false
+  const officialEntry = path.join(directory, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  if (!existsSync(marker) || !existsSync(entry) || (!existsSync(frontend) && !existsSync(officialEntry))) return false
   try {
     return JSON.parse(readFileSync(marker, 'utf8')).harness_version === version
   } catch {

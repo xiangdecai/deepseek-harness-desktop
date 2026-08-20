@@ -268,6 +268,7 @@ class HarnessRuntimeUpdater {
     this.logger = options.logger
     this.nodeExecutable = options.nodeExecutable
     this.npmCli = options.npmCli
+    this.pnpmCli = options.pnpmCli
     this.patchRuntime = options.patchRuntime
     this.releaseUrl = options.releaseUrl ?? 'https://github.com/deepseek-ai/deepseek-harness/releases'
     this.apiUrl = options.apiUrl ?? RELEASES_API
@@ -343,8 +344,7 @@ class HarnessRuntimeUpdater {
     if (update?.status !== 'update-available') throw new Error('No installable Harness update was provided')
     const runtimeDirectory = path.join(this.userData, 'runtime')
     const staging = path.join(runtimeDirectory, `.update-${update.latestVersion}-${process.pid}-${Date.now()}`)
-    // Keep the official archive extension so npm recognizes a local .tgz package.
-    // A .tgz.download suffix is treated as a directory by npm 11 on Windows.
+    // Keep the official archive extension so pnpm recognizes a local .tgz package.
     const archive = path.join(runtimeDirectory, update.asset.name)
     const staleDownload = `${archive}.download`
     const target = path.join(runtimeDirectory, `harness-${update.latestVersion}`)
@@ -374,12 +374,13 @@ class HarnessRuntimeUpdater {
     onProgress?.({ phase: 'install', percent: 78, message: '正在安装 Harness 运行时依赖' })
     await mkdir(staging, { recursive: true })
     if (update.source === 'npm') {
-      await installNpmPackage({
+      await installPnpmPackage({
         staging,
         archive,
         version: update.latestVersion,
         nodeExecutable: this.nodeExecutable,
-        npmCli: this.npmCli,
+        pnpmCli: this.pnpmCli,
+        onProgress: progress => onProgress?.({ phase: 'install', ...progress }),
       })
     } else {
       await extractArchive(archive, staging)
@@ -453,9 +454,15 @@ class HarnessRuntimeUpdater {
   }
 }
 
-async function installNpmPackage({ staging, archive, version, nodeExecutable, npmCli }) {
-  if (!nodeExecutable || !npmCli || !existsSync(nodeExecutable) || !existsSync(npmCli)) {
-    throw new Error('Bundled npm is missing; rebuild the desktop package with the Node runtime preparation step')
+function pnpmInstallArguments(staging, archive) {
+  return [
+    'add', '--dir', staging, '--prod', '--ignore-scripts', '--no-lockfile', archive,
+  ]
+}
+
+async function installPnpmPackage({ staging, archive, version, nodeExecutable, pnpmCli, onProgress }) {
+  if (!nodeExecutable || !pnpmCli || !existsSync(nodeExecutable) || !existsSync(pnpmCli)) {
+    throw new Error('Bundled pnpm is missing; rebuild the desktop package with the pnpm runtime resource')
   }
   await writeFile(path.join(staging, 'package.json'), `${JSON.stringify({
     name: 'deepseek-harness-runtime-staging',
@@ -463,21 +470,56 @@ async function installNpmPackage({ staging, archive, version, nodeExecutable, np
     private: true,
   })}\n`, 'utf8')
   await new Promise((resolve, reject) => {
-    const child = spawn(nodeExecutable, [npmCli, 'install', '--prefix', staging, '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', archive], {
+    const child = spawn(nodeExecutable, [pnpmCli, ...pnpmInstallArguments(staging, archive)], {
       cwd: staging,
       windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, NPM_CONFIG_UPDATE_NOTIFIER: 'false' },
     })
+    const maxOutputLength = 16 * 1024
+    let stdout = ''
     let stderr = ''
+    let elapsedSeconds = 0
+    let timedOut = false
+    let settled = false
+    const appendOutput = (current, chunk) => `${current}${chunk}`.slice(-maxOutputLength)
+    const finish = callback => {
+      if (settled) return
+      settled = true
+      clearInterval(progressTimer)
+      clearTimeout(timeout)
+      callback()
+    }
+    const progressTimer = setInterval(() => {
+      elapsedSeconds += 10
+      onProgress?.({
+        percent: Math.min(91, 78 + Math.floor(elapsedSeconds / 10)),
+        message: `正在安装 Harness 运行时依赖（已用 ${elapsedSeconds} 秒）`,
+      })
+    }, 10_000)
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, 3 * 60 * 1000)
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', chunk => { stdout = appendOutput(stdout, chunk) })
     child.stderr.setEncoding('utf8')
-    child.stderr.on('data', chunk => { stderr += chunk })
-    child.once('error', reject)
-    child.once('exit', code => code === 0 ? resolve() : reject(new Error(`npm install for Harness ${version} failed with code ${code}: ${stderr.trim()}`)))
+    child.stderr.on('data', chunk => { stderr = appendOutput(stderr, chunk) })
+    child.once('error', error => finish(() => reject(error)))
+    child.once('exit', code => finish(() => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+      const detail = `${stderr}\n${stdout}`.trim()
+      const reason = timedOut
+        ? `timed out after 3 minutes while installing dependencies${detail ? `: ${detail}` : ''}`
+        : `failed with code ${code}${detail ? `: ${detail}` : ''}`
+      reject(new Error(`pnpm install for Harness ${version} ${reason}`))
+    }))
   })
   const packageRoot = path.join(staging, 'node_modules', '@deepseek-ai', 'dsh')
-  if (!existsSync(path.join(packageRoot, 'lib', 'bin.js'))) throw new Error('npm installed Harness package has no lib/bin.js')
-  await cp(path.join(packageRoot, 'lib'), path.join(staging, 'lib'), { recursive: true })
+  if (!existsSync(path.join(packageRoot, 'lib', 'bin.js'))) throw new Error('pnpm installed Harness package has no lib/bin.js')
   if (existsSync(path.join(packageRoot, 'config'))) {
     await cp(path.join(packageRoot, 'config'), path.join(staging, 'config'), { recursive: true })
   }
@@ -485,6 +527,8 @@ async function installNpmPackage({ staging, archive, version, nodeExecutable, np
     const source = path.join(packageRoot, file)
     if (existsSync(source)) await cp(source, path.join(staging, file))
   }
+  await mkdir(path.join(staging, 'lib'), { recursive: true })
+  await writeFile(path.join(staging, 'lib', 'bin.js'), "import '../node_modules/@deepseek-ai/dsh/lib/bin.js'\n", 'utf8')
 }
 
 module.exports = {
@@ -492,6 +536,7 @@ module.exports = {
   compareVersions,
   extractNpmRuntime,
   normalizeVersion,
+  pnpmInstallArguments,
   selectNpmRuntime,
   selectRuntimeAsset,
   runtimeVersion,

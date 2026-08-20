@@ -425,6 +425,10 @@ class HarnessRuntimeUpdater {
     this.logger?.info(`Official Harness ${state.pending.version} is now active.`, 'updater')
   }
 
+  async getState() {
+    return await readState(this.userData)
+  }
+
   async rollbackPending() {
     const state = await readState(this.userData)
     if (!state.pending) return state.active?.path

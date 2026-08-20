@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Native Windows desktop carrier for the official DeepSeek Harness Web UI",
   "author": "Xiangong AI",
   "license": "MIT",

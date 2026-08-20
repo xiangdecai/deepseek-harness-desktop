@@ -14,6 +14,12 @@ const { DesktopAppUpdater } = require('./desktop-updater.cjs')
 const { applyDesktopDeliverablesPatch } = require('./desktop-deliverables.cjs')
 const { DesktopPluginManager } = require('./plugin-manager.cjs')
 const {
+  commitProfileRuntimeShadows,
+  quarantineProfileRuntimeShadows,
+  recoverProfileRuntimeShadows,
+  restoreProfileRuntimeShadows,
+} = require('./profile-runtime-shadows.cjs')
+const {
   DEFAULT_WINDOW_BOUNDS, DEFAULT_TEXT_SCALE, nextTextScale, readDisplayPreferences, writeDisplayPreferences,
 } = require('./display-preferences.cjs')
 
@@ -40,6 +46,14 @@ let displayPreferences = { textScale: DEFAULT_TEXT_SCALE }
 let pluginManager
 let deliverablesStatus
 let serviceRestartPromise
+
+async function restoreProfileShadowsOrLog(transaction) {
+  try {
+    await restoreProfileRuntimeShadows(transaction, logger)
+  } catch (error) {
+    logger?.error(`Profile compatibility rollback failed: ${error.message}`, 'updater')
+  }
+}
 
 function projectPath(...segments) {
   return path.join(__dirname, '..', ...segments)
@@ -214,6 +228,7 @@ async function installHarnessUpdate(update) {
   const previousRuntime = runtimePath
   const previousVersion = runtimeVersionValue
   let serviceStopped = false
+  let profileShadowTransaction
   try {
     await pluginManager.backup('before-harness-update')
     await showStartupPage()
@@ -230,11 +245,19 @@ async function installHarnessUpdate(update) {
     serviceStopped = true
     runtimePath = installed.path
     runtimeVersionValue = installed.version
+    profileShadowTransaction = await quarantineProfileRuntimeShadows({
+      dshHome: service.dshHome,
+      runtimePath,
+      runtimeVersion: runtimeVersionValue,
+      logger,
+    })
     deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
     service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
     service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
+    await commitProfileRuntimeShadows(profileShadowTransaction, logger)
+    profileShadowTransaction = undefined
     await showHarness()
     buildMenus()
     await dialog.showMessageBox(mainWindow, {
@@ -245,6 +268,8 @@ async function installHarnessUpdate(update) {
     })
   } catch (error) {
     logger.error(`Harness update activation failed: ${error.message}`, 'updater')
+    await restoreProfileShadowsOrLog(profileShadowTransaction)
+    profileShadowTransaction = undefined
     await runtimeUpdater.rollbackPending()
     runtimePath = previousRuntime
     runtimeVersionValue = previousVersion
@@ -561,6 +586,11 @@ async function boot() {
     userData: app.getPath('userData'), logger, nodeExecutable, pnpmCli,
     patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger, dshHome),
   })
+  const startupShadowTransactions = await recoverProfileRuntimeShadows({
+    dshHome,
+    runtimeState: await runtimeUpdater.getState(),
+    logger,
+  })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
   deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, dshHome)
   if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable: ${deliverablesStatus.reason}`, 'plugins')
@@ -588,10 +618,12 @@ async function boot() {
   try {
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
+    for (const transaction of startupShadowTransactions) await commitProfileRuntimeShadows(transaction, logger)
     await showHarness()
     buildMenus()
   } catch (error) {
     logger.error(`Startup failed: ${error.message}`)
+    for (const transaction of startupShadowTransactions) await restoreProfileShadowsOrLog(transaction)
     const fallback = await runtimeUpdater.rollbackPending()
     if (fallback || path.resolve(runtimePath) !== path.resolve(fallbackRuntimePath)) {
       runtimePath = fallback || fallbackRuntimePath

@@ -7,6 +7,7 @@ const https = require('node:https')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { validRuntime } = require('./runtime-loader.cjs')
+const { assertInstallableRuntime, classifyRuntimeVersion } = require('./runtime-compatibility.cjs')
 
 const OFFICIAL_REPOSITORY = 'deepseek-ai/deepseek-harness'
 const RELEASES_API = `https://api.github.com/repos/${OFFICIAL_REPOSITORY}/releases/latest`
@@ -116,7 +117,7 @@ function request(url, { accept = 'application/json' } = {}) {
     const requestHandle = https.get(url, {
       headers: {
         Accept: accept,
-        'User-Agent': 'DeepSeek-Harness-Desktop-Updater',
+        'User-Agent': 'X-DSH-Desktop-Updater',
       },
     }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
@@ -145,7 +146,7 @@ function request(url, { accept = 'application/json' } = {}) {
 function download(url, destination, onProgress) {
   return new Promise((resolve, reject) => {
     const requestHandle = https.get(url, {
-      headers: { 'User-Agent': 'DeepSeek-Harness-Desktop-Updater' },
+      headers: { 'User-Agent': 'X-DSH-Desktop-Updater' },
     }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume()
@@ -285,6 +286,15 @@ class HarnessRuntimeUpdater {
         return { status: 'up-to-date', source: 'npm', channel: runtime.tag, currentVersion, latestVersion, releaseUrl: this.releaseUrl }
       }
       if (latestVersion && versionInfo?.dist?.tarball && versionInfo?.dist?.integrity) {
+        const compatibility = classifyRuntimeVersion(latestVersion)
+        if (!compatibility.installable) {
+          return {
+            status: 'unsupported', source: 'npm', channel: runtime.tag, currentVersion, latestVersion,
+            releaseUrl: `https://www.npmjs.com/package/${NPM_PACKAGE}`,
+            reason: `发现 Harness ${latestVersion}，但尚未通过 X DSH Desktop 兼容性验证。当前运行时保持不变。`,
+            compatibility,
+          }
+        }
         return {
           status: 'update-available',
           source: 'npm',
@@ -315,6 +325,15 @@ class HarnessRuntimeUpdater {
       if (compareVersions(latestVersion, currentVersion) <= 0) {
         return { status: 'up-to-date', currentVersion, latestVersion, releaseUrl: release.html_url ?? this.releaseUrl }
       }
+      const compatibility = classifyRuntimeVersion(latestVersion)
+      if (!compatibility.installable) {
+        return {
+          status: 'unsupported', currentVersion, latestVersion,
+          releaseUrl: release.html_url ?? this.releaseUrl,
+          reason: `发现 Harness ${latestVersion}，但尚未通过 X DSH Desktop 兼容性验证。当前运行时保持不变。`,
+          compatibility,
+        }
+      }
       const asset = selectRuntimeAsset(release)
       if (!asset || !asset.browser_download_url) {
         return { status: 'unsupported', currentVersion, latestVersion, releaseUrl: release.html_url ?? this.releaseUrl, reason: '官方 Release 未提供 Windows Harness runtime archive' }
@@ -342,6 +361,7 @@ class HarnessRuntimeUpdater {
 
   async install(update, { onProgress } = {}) {
     if (update?.status !== 'update-available') throw new Error('No installable Harness update was provided')
+    assertInstallableRuntime(update.latestVersion)
     const runtimeDirectory = path.join(this.userData, 'runtime')
     const staging = path.join(runtimeDirectory, `.update-${update.latestVersion}-${process.pid}-${Date.now()}`)
     // Keep the official archive extension so pnpm recognizes a local .tgz package.

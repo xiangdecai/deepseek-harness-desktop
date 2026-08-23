@@ -23,17 +23,20 @@ const {
   DEFAULT_WINDOW_BOUNDS, DEFAULT_TEXT_SCALE, nextTextScale, readDisplayPreferences, writeDisplayPreferences,
 } = require('./display-preferences.cjs')
 
+const PRODUCT_NAME = 'X DSH Desktop'
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 
 let mainWindow
 let logWindow
 let pluginWindow
+let updateWindow
 let tray
 let logger
 let service
 let vision
-let visionEnabled = true
+let visionEnabled = false
 let quitting = false
 let runtimeUpdater
 let runtimePath
@@ -42,6 +45,7 @@ let runtimeVersionValue = ''
 let updateInProgress = false
 let desktopUpdater
 let desktopUpdatePrompted = false
+let harnessUpdateStatus
 let displayPreferences = { textScale: DEFAULT_TEXT_SCALE }
 let pluginManager
 let deliverablesStatus
@@ -79,7 +83,7 @@ function createWindow() {
     show: false,
     backgroundColor: '#f7f8fa',
     icon: projectPath('assets', 'icon.png'),
-    title: 'DeepSeek Harness Desktop',
+    title: PRODUCT_NAME,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -133,7 +137,7 @@ async function showHarness() {
       }
     }
   }
-  mainWindow.setTitle('DeepSeek Harness Desktop')
+  mainWindow.setTitle(PRODUCT_NAME)
   mainWindow.show()
 }
 
@@ -148,7 +152,7 @@ function createLogWindow() {
     height: 620,
     minWidth: 680,
     minHeight: 420,
-    title: 'DeepSeek Harness Desktop - 启动日志',
+    title: `${PRODUCT_NAME} - 启动日志`,
     parent: mainWindow,
     icon: projectPath('assets', 'icon.png'),
     webPreferences: {
@@ -162,6 +166,40 @@ function createLogWindow() {
   logWindow.on('closed', () => { logWindow = undefined })
 }
 
+function createUpdateWindow() {
+  if (updateWindow && !updateWindow.isDestroyed()) return updateWindow
+  updateWindow = new BrowserWindow({
+    width: 660,
+    height: 660,
+    minWidth: 520,
+    minHeight: 520,
+    show: false,
+    parent: mainWindow,
+    title: `${PRODUCT_NAME} - 更新`,
+    backgroundColor: '#ffffff',
+    icon: projectPath('assets', 'icon.png'),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  updateWindow.once('ready-to-show', () => updateWindow?.show())
+  void showStartupPage(updateWindow)
+  updateWindow.on('closed', () => { updateWindow = undefined })
+  return updateWindow
+}
+
+function publishHarnessUpdate(progress) {
+  harnessUpdateStatus = progress
+  const target = createUpdateWindow()
+  const fraction = Number.isFinite(progress.percent) ? progress.percent / 100 : 2
+  target.setProgressBar(progress.phase === 'complete' || progress.phase === 'error' ? -1 : fraction)
+  target.webContents.send('desktop:update-progress', progress)
+}
+
 function createPluginCenter() {
   if (pluginWindow && !pluginWindow.isDestroyed()) {
     pluginWindow.show()
@@ -173,7 +211,7 @@ function createPluginCenter() {
     height: 720,
     minWidth: 720,
     minHeight: 520,
-    title: 'DeepSeek Harness Desktop - 插件中心',
+    title: `${PRODUCT_NAME} - 插件中心`,
     parent: mainWindow,
     icon: projectPath('assets', 'icon.png'),
     webPreferences: {
@@ -185,7 +223,7 @@ function createPluginCenter() {
 }
 
 function sendLog(record) {
-  for (const window of [mainWindow, logWindow]) {
+  for (const window of [mainWindow, logWindow, updateWindow]) {
     if (window && !window.isDestroyed()) window.webContents.send('desktop:log', record)
   }
 }
@@ -231,14 +269,13 @@ async function installHarnessUpdate(update) {
   let profileShadowTransaction
   try {
     await pluginManager.backup('before-harness-update')
-    await showStartupPage()
-    mainWindow?.webContents.send('desktop:update-progress', {
+    publishHarnessUpdate({
       phase: 'prepare', percent: 0, message: `正在准备 Harness ${update.latestVersion} 更新`,
     })
     const installed = await runtimeUpdater.install(update, {
-      onProgress: progress => mainWindow?.webContents.send('desktop:update-progress', progress),
+      onProgress: publishHarnessUpdate,
     })
-    mainWindow?.webContents.send('desktop:update-progress', {
+    publishHarnessUpdate({
       phase: 'restart', percent: 97, message: '正在重启 Harness 服务',
     })
     await service.stop()
@@ -260,11 +297,10 @@ async function installHarnessUpdate(update) {
     profileShadowTransaction = undefined
     await showHarness()
     buildMenus()
-    await dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Harness 更新完成',
-      message: `官方 Harness ${installed.version} 已启用。`,
-      detail: '项目数据、会话目录和模型配置保持不变。',
+    publishHarnessUpdate({
+      phase: 'complete', percent: 100,
+      message: `官方 Harness ${installed.version} 已启用`,
+      detail: '项目数据、会话目录、模型配置和插件保持不变。',
     })
   } catch (error) {
     logger.error(`Harness update activation failed: ${error.message}`, 'updater')
@@ -288,6 +324,11 @@ async function installHarnessUpdate(update) {
     } else {
       await showHarness()
     }
+    publishHarnessUpdate({
+      phase: 'error', percent: 100,
+      message: `Harness 更新失败：${error.message}`,
+      detail: '原运行时已恢复，项目数据没有改变。',
+    })
     throw error
   } finally {
     updateInProgress = false
@@ -320,9 +361,7 @@ async function checkHarnessUpdate() {
     if (answer.response !== 0) return
     try {
       await installHarnessUpdate(result)
-    } catch (error) {
-      await dialog.showErrorBox('Harness 更新失败', `${error.message}\n\n原运行时已保留。`)
-    }
+    } catch {}
     return
   }
   const detail = result.reason ?? '官方暂未提供可安装的 Windows runtime。'
@@ -340,45 +379,35 @@ async function checkHarnessUpdate() {
 
 function publishDesktopUpdate(status) {
   if (status.status === 'downloading') {
+    harnessUpdateStatus = undefined
     const fraction = Number.isFinite(status.percent) ? status.percent / 100 : 2
-    mainWindow?.setProgressBar(fraction)
-    // The Harness page has no desktop update surface. Show the native startup
-    // page so the user can see the transfer instead of only a taskbar hint.
-    void showStartupPage()
-    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    const target = createUpdateWindow()
+    target.setProgressBar(fraction)
+    target.webContents.send('desktop:app-update-progress', status)
     return
   }
   if (status.status === 'downloaded') {
-    mainWindow?.setProgressBar(-1)
-    mainWindow?.webContents.send('desktop:app-update-progress', status)
-    void dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '桌面应用更新已就绪',
-      message: `DeepSeek Harness Desktop ${status.version} 已下载。`,
-      detail: '关闭并安装不会清理 DSH_HOME 中的会话、密钥、插件或记忆。',
-      buttons: ['立即安装', '下次启动时安装'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(answer => {
-      if (answer.response === 0) desktopUpdater?.install()
-      else void showHarness()
-    })
+    harnessUpdateStatus = undefined
+    const target = createUpdateWindow()
+    target.setProgressBar(-1)
+    target.webContents.send('desktop:app-update-progress', status)
     return
   }
   if (status.status === 'available') {
-    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    updateWindow?.webContents.send('desktop:app-update-progress', status)
     if (!desktopUpdatePrompted) {
       desktopUpdatePrompted = true
       new Notification({
-        title: 'DeepSeek Harness Desktop 有新版本',
+        title: `${PRODUCT_NAME} 有新版本`,
         body: `${status.version} 已可下载。可在“帮助”中安装。`,
       }).show()
     }
     return
   }
   if (status.status === 'error') {
-    mainWindow?.setProgressBar(-1)
-    mainWindow?.webContents.send('desktop:app-update-progress', status)
+    harnessUpdateStatus = undefined
+    updateWindow?.setProgressBar(-1)
+    updateWindow?.webContents.send('desktop:app-update-progress', status)
   }
 }
 
@@ -421,9 +450,8 @@ async function checkDesktopUpdate({ manual = true } = {}) {
     return
   }
   if (result.status === 'error') {
-    await dialog.showMessageBox(mainWindow, {
-      type: 'warning', title: '桌面应用更新检查失败', message: result.message, detail: '当前版本和全部用户数据已保持不变。',
-    })
+    publishDesktopUpdate({ status: 'error', message: result.message, detail: '当前版本和全部用户数据已保持不变。' })
+    createUpdateWindow().show()
   }
 }
 
@@ -463,7 +491,7 @@ function buildMenus() {
         { label: '重启 / 重新连接', click: restart },
         { label: '查看启动日志', click: createLogWindow },
         { type: 'separator' },
-        { label: '粘贴图片生成视觉证据', type: 'checkbox', checked: visionEnabled, click: toggleVision },
+        { label: '纯文本模型：粘贴图片生成 OCR 证据', type: 'checkbox', checked: visionEnabled, click: toggleVision },
       ],
     },
     {
@@ -509,7 +537,7 @@ function buildMenus() {
     { label: '插件中心', click: createPluginCenter },
     { label: '打开数据目录', click: openData },
     { label: '打开日志目录', click: openLogs },
-    { label: '粘贴图片生成视觉证据', type: 'checkbox', checked: visionEnabled, click: toggleVision },
+    { label: '纯文本模型：粘贴图片生成 OCR 证据', type: 'checkbox', checked: visionEnabled, click: toggleVision },
     { type: 'separator' },
     { label: '退出', click: () => { quitting = true; app.quit() } },
   ]))
@@ -519,24 +547,29 @@ function createTray() {
   const iconPath = projectPath('assets', 'icon.png')
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 })
   tray = new Tray(icon)
-  tray.setToolTip('DeepSeek Harness Desktop')
+  tray.setToolTip(PRODUCT_NAME)
   tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
   buildMenus()
 }
 
 function registerIpc() {
-  ipcMain.handle('desktop:get-state', () => ({
+  ipcMain.handle('desktop:get-state', event => ({
     service: service.status,
     logs: logger.snapshot(),
     logFile: logger.filePath,
     visionEnabled,
+    runtimeVersion: runtimeVersionValue,
+    harnessUpdate: harnessUpdateStatus,
     appUpdate: desktopUpdater?.status,
+    isUpdateWindow: BrowserWindow.fromWebContents(event.sender) === updateWindow,
   }))
   ipcMain.handle('desktop:restart', restartService)
   ipcMain.handle('desktop:open-browser', () => service.url ? shell.openExternal(service.url) : undefined)
   ipcMain.handle('desktop:open-data-directory', () => shell.openPath(service.dshHome))
   ipcMain.handle('desktop:open-log-directory', () => shell.openPath(path.dirname(logger.filePath)))
   ipcMain.handle('desktop:check-app-update', () => checkDesktopUpdate({ manual: true }))
+  ipcMain.handle('desktop:install-app-update', () => desktopUpdater?.install())
+  ipcMain.handle('desktop:close-update-window', () => updateWindow?.close())
   ipcMain.handle('desktop:set-chat-text-scale', (_event, textScale) => setChatTextScale(textScale))
   ipcMain.handle('desktop:get-plugin-inventory', () => pluginManager.inventory({ runtimePath, runtimeVersion: runtimeVersionValue, deliverables: deliverablesStatus }))
   ipcMain.handle('desktop:backup-plugin-state', () => pluginManager.backup('manual'))
@@ -548,9 +581,9 @@ function registerIpc() {
 async function boot() {
   app.setAppUserModelId('ai.deepseek.harness.desktop')
   app.setAboutPanelOptions({
-    applicationName: 'DeepSeek Harness Desktop',
+    applicationName: PRODUCT_NAME,
     applicationVersion: app.getVersion(),
-    copyright: 'MIT licensed desktop carrier. DeepSeek Harness is an official DeepSeek project.',
+    copyright: 'Independent MIT-licensed desktop carrier for DeepSeek Harness.',
   })
   const logDirectory = path.join(app.getPath('userData'), 'logs')
   const cacheDirectory = path.join(app.getPath('userData'), 'vision-cache')
@@ -612,7 +645,7 @@ async function boot() {
   createTray()
   registerIpc()
   await showStartupPage()
-  logger.info(`DeepSeek Harness Desktop ${app.getVersion()} starting.`)
+  logger.info(`${PRODUCT_NAME} ${app.getVersion()} starting.`)
   setTimeout(() => { void checkDesktopUpdate({ manual: false }) }, 10_000)
   setInterval(() => { void checkDesktopUpdate({ manual: false }) }, 6 * 60 * 60 * 1000).unref()
   try {

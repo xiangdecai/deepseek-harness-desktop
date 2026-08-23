@@ -22,7 +22,7 @@ C:\Users\<用户名>\.env
 
 处理方式：
 
-1. 关闭 DeepSeek Harness Desktop。
+1. 关闭 X DSH Desktop。
 2. 打开日志中提示的 `.env` 文件。
 3. 删除或注释冲突行；需要保留的值请改为 Windows 用户环境变量或系统环境变量。
 4. 重新启动桌面应用。

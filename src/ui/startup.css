@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
   font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
-  color: #20232a;
+  color: #20242b;
   background: #ffffff;
   letter-spacing: 0;
 }
@@ -45,9 +45,9 @@ button {
   height: 80px;
   place-items: center;
   margin-bottom: 20px;
-  border: 1px solid #e9e4d8;
-  border-radius: 17px;
-  background: #f6f1e7;
+  border: 1px solid #d9dee5;
+  border-radius: 16px;
+  background: #f7f8fa;
   box-shadow: 0 8px 24px rgb(31 35 42 / 8%);
 }
 
@@ -59,7 +59,7 @@ button {
 
 h1 {
   margin: 0;
-  color: #20232a;
+  color: #20242b;
   font-size: 21px;
   font-weight: 650;
   line-height: 1.25;
@@ -81,7 +81,7 @@ h1 {
 }
 
 .status-line.error { color: #b42318; }
-.status-line.update { color: #2557a7; }
+.status-line.update { color: #167a75; }
 
 .progress-track {
   position: relative;
@@ -96,7 +96,7 @@ h1 {
   display: block;
   width: 32%;
   height: 100%;
-  background: #4d6bfe;
+  background: #18a39b;
   animation: boot-progress 1.7s ease-in-out infinite;
 }
 
@@ -112,7 +112,7 @@ h1 {
 }
 
 .progress-track.update span {
-  background: #2557a7;
+  background: #18a39b;
   animation: none;
   transition: width 180ms ease;
 }
@@ -151,12 +151,12 @@ h1 {
   padding: 0 16px;
   border-radius: 6px;
   color: #ffffff;
-  background: #4d6bfe;
+  background: #167a75;
   font-size: 13px;
   font-weight: 600;
 }
 
-.primary:hover { background: #3f5be0; }
+.primary:hover { background: #105f5b; }
 
 .text-button {
   padding: 7px 5px;
@@ -165,12 +165,12 @@ h1 {
   font-size: 12px;
 }
 
-.text-button:hover { color: #4d6bfe; }
+.text-button:hover { color: #167a75; }
 
 .text-button:focus-visible,
 .primary:focus-visible,
 .log-drawer summary:focus-visible {
-  outline: 2px solid #4d6bfe;
+  outline: 2px solid #18a39b;
   outline-offset: 3px;
 }
 

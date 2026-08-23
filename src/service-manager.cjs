@@ -13,6 +13,13 @@ const BOOTSTRAP_ENV_NAMES = new Set([
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_TLS_REJECT_UNAUTHORIZED',
 ])
 
+function managedArguments(dshEntry, patchFiles, port) {
+  const args = [dshEntry, 'web']
+  for (const patch of patchFiles) args.push('--patch', patch)
+  args.push('--port', String(port), '--no-open')
+  return args
+}
+
 function projectBootstrapEnvKeys(cwd) {
   const file = path.join(cwd, '.env')
   if (!existsSync(file)) return []
@@ -109,9 +116,7 @@ class HarnessServiceManager extends EventEmitter {
     this.logger.info(`DSH_HOME=${this.dshHome}`)
     this.logger.info(`Workspace=${this.cwd}`)
 
-    const args = [this.dshEntry, 'web']
-    for (const patch of this.patchFiles) args.push('--patch', patch)
-    args.push('--port', String(port))
+    const args = managedArguments(this.dshEntry, this.patchFiles, port)
     const child = spawn(this.nodeExecutable, args, {
       cwd: this.cwd,
       env: {
@@ -248,4 +253,4 @@ class HarnessServiceManager extends EventEmitter {
   }
 }
 
-module.exports = { HarnessServiceManager }
+module.exports = { HarnessServiceManager, managedArguments }

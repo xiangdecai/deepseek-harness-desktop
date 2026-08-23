@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('harnessDesktop', {
   openDataDirectory: () => ipcRenderer.invoke('desktop:open-data-directory'),
   openLogDirectory: () => ipcRenderer.invoke('desktop:open-log-directory'),
   checkAppUpdate: () => ipcRenderer.invoke('desktop:check-app-update'),
+  installAppUpdate: () => ipcRenderer.invoke('desktop:install-app-update'),
+  closeUpdateWindow: () => ipcRenderer.invoke('desktop:close-update-window'),
   getPluginInventory: () => ipcRenderer.invoke('desktop:get-plugin-inventory'),
   backupPluginState: () => ipcRenderer.invoke('desktop:backup-plugin-state'),
   openPluginBackups: () => ipcRenderer.invoke('desktop:open-plugin-backups'),
@@ -48,10 +50,10 @@ async function insertEvidence(target, evidence) {
 }
 
 function showVisionStatus(message, tone = 'working') {
-  let toast = document.getElementById('__dhd-vision-status')
+  let toast = document.getElementById('__xdsh-vision-status')
   if (toast === null) {
     toast = document.createElement('div')
-    toast.id = '__dhd-vision-status'
+    toast.id = '__xdsh-vision-status'
     Object.assign(toast.style, {
       position: 'fixed',
       top: '16px',

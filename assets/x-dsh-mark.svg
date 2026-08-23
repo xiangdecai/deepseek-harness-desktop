@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="X DSH Desktop">
+  <rect width="512" height="512" rx="104" fill="#f7f8fa"/>
+  <path d="M112 92h91l53 77 53-77h91L301 235l111 185h-92l-64-105-64 105h-92l111-185z" fill="#20242b"/>
+  <path d="M256 169l53-77h91L301 235l111 185h-92l-64-105z" fill="#18a39b"/>
+  <circle cx="256" cy="256" r="218" fill="none" stroke="#d9dee5" stroke-width="16"/>
+</svg>

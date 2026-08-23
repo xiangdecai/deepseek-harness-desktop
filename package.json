@@ -1,7 +1,7 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.2.7",
-  "description": "Native Windows desktop carrier for the official DeepSeek Harness Web UI",
+  "version": "0.3.0",
+  "description": "Independent Windows desktop carrier for the official DeepSeek Harness Web UI",
   "author": "Xiangong AI",
   "license": "MIT",
   "private": true,
@@ -31,7 +31,7 @@
   },
   "build": {
     "appId": "ai.deepseek.harness.desktop",
-    "productName": "DeepSeek Harness Desktop",
+    "productName": "X DSH Desktop",
     "electronDist": "node_modules/electron/dist",
     "asar": true,
     "asarUnpack": [
@@ -77,17 +77,17 @@
       ]
     },
     "nsis": {
-      "artifactName": "DeepSeek-Harness-Desktop-Setup-${version}-${arch}.${ext}",
+      "artifactName": "X-DSH-Desktop-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DeepSeek Harness Desktop",
+      "shortcutName": "X DSH Desktop",
       "deleteAppDataOnUninstall": false,
       "differentialPackage": true
     },
     "portable": {
-      "artifactName": "DeepSeek-Harness-Desktop-Portable-${version}-${arch}.${ext}"
+      "artifactName": "X-DSH-Desktop-Portable-${version}-${arch}.${ext}"
     },
     "publish": [
       {

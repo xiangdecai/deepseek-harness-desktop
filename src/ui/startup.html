@@ -4,17 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
-    <title>DeepSeek Harness Desktop</title>
+    <title>X DSH Desktop</title>
     <link rel="stylesheet" href="startup.css">
   </head>
   <body>
     <main class="boot-shell">
       <section class="boot-panel" aria-live="polite">
         <div class="brand-mark">
-          <img src="../../assets/icon.png" width="64" height="64" alt="DeepSeek">
+          <img src="../../assets/icon.png" width="64" height="64" alt="X DSH Desktop">
         </div>
-        <h1>DeepSeek Harness</h1>
-        <p class="product-label">Desktop</p>
+        <h1>X DSH Desktop</h1>
+        <p class="product-label">DeepSeek Harness 本地运行中</p>
         <p id="status-line" class="status-line">正在启动本地 Harness 服务</p>
         <div id="progress-track" class="progress-track" role="progressbar" aria-label="Harness 启动进度">
           <span></span>
@@ -24,6 +24,8 @@
 
         <div class="primary-actions">
           <button id="retry" class="primary" type="button" hidden>重新启动</button>
+          <button id="install-update" class="primary" type="button" hidden>立即安装</button>
+          <button id="close-update" class="text-button" type="button" hidden>稍后</button>
           <button id="view-log" class="text-button" type="button">查看启动日志</button>
         </div>
 

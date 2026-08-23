@@ -6,6 +6,8 @@ const statusDetail = document.getElementById('status-detail')
 const serviceDetail = document.getElementById('service-detail')
 const progressTrack = document.getElementById('progress-track')
 const retryButton = document.getElementById('retry')
+const installUpdateButton = document.getElementById('install-update')
+const closeUpdateButton = document.getElementById('close-update')
 const logDrawer = document.getElementById('log-drawer')
 let updateMode = false
 
@@ -59,12 +61,19 @@ function renderUpdateProgress(progress = {}) {
   updateMode = true
   const percent = Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : undefined
   statusLine.className = 'status-line update'
-  statusLine.textContent = '正在更新官方 Harness'
+  statusLine.textContent = progress.phase === 'complete'
+    ? 'Harness 更新完成'
+    : progress.phase === 'error'
+      ? 'Harness 更新失败'
+      : '正在更新官方 Harness'
   statusDetail.textContent = progress.message || '正在准备更新'
-  serviceDetail.textContent = percent === undefined ? '安装依赖可能需要一些时间' : `${percent}%`
-  progressTrack.className = `progress-track update${progress.phase === 'complete' ? ' ready' : ''}`
+  serviceDetail.textContent = progress.detail || (percent === undefined ? '安装依赖可能需要一些时间' : `${percent}%`)
+  progressTrack.className = `progress-track update${progress.phase === 'complete' ? ' ready' : progress.phase === 'error' ? ' error' : ''}`
   progressTrack.querySelector('span').style.width = percent === undefined ? '' : `${percent}%`
   retryButton.hidden = true
+  installUpdateButton.hidden = true
+  closeUpdateButton.hidden = !['complete', 'error'].includes(progress.phase)
+  closeUpdateButton.textContent = '关闭'
   logDrawer.open = true
 }
 
@@ -78,6 +87,10 @@ function renderAppUpdateProgress(progress = {}) {
     statusDetail.textContent = `${progress.version} 已下载，等待安装`
     progressTrack.className = 'progress-track ready'
     progressTrack.querySelector('span').style.width = '100%'
+    serviceDetail.textContent = '会话、密钥、插件和记忆保持不变'
+    installUpdateButton.hidden = false
+    closeUpdateButton.hidden = false
+    closeUpdateButton.textContent = '稍后'
     return
   }
   if (progress.status === 'error') {
@@ -85,6 +98,10 @@ function renderAppUpdateProgress(progress = {}) {
     statusLine.textContent = '桌面应用更新失败'
     statusDetail.textContent = progress.message || '当前版本保持不变'
     progressTrack.className = 'progress-track error'
+    serviceDetail.textContent = progress.detail || '当前版本和全部用户数据已保持不变'
+    installUpdateButton.hidden = true
+    closeUpdateButton.hidden = false
+    closeUpdateButton.textContent = '关闭'
     return
   }
   if (progress.status === 'downloading') {
@@ -94,6 +111,9 @@ function renderAppUpdateProgress(progress = {}) {
     statusDetail.textContent = `${percent}%`
     progressTrack.className = 'progress-track update'
     progressTrack.querySelector('span').style.width = `${percent}%`
+    installUpdateButton.hidden = true
+    closeUpdateButton.hidden = false
+    closeUpdateButton.textContent = '隐藏'
   }
 }
 
@@ -103,7 +123,8 @@ async function initialize() {
   const state = await window.harnessDesktop.getState()
   let lastMessage = ''
   state.logs.forEach(record => { lastMessage = addLog(record) })
-  if (state.appUpdate?.status && state.appUpdate.status !== 'idle') renderAppUpdateProgress(state.appUpdate)
+  if (state.isUpdateWindow && state.harnessUpdate) renderUpdateProgress(state.harnessUpdate)
+  else if (state.isUpdateWindow && state.appUpdate?.status && state.appUpdate.status !== 'idle') renderAppUpdateProgress(state.appUpdate)
   else renderStatus(state.service, lastMessage)
   window.harnessDesktop.onLog(record => {
     lastMessage = addLog(record)
@@ -129,6 +150,14 @@ document.getElementById('view-log').addEventListener('click', () => {
   logDrawer.open = !logDrawer.open
   if (logDrawer.open) logDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 })
+
+installUpdateButton.addEventListener('click', () => {
+  installUpdateButton.disabled = true
+  statusDetail.textContent = '正在退出应用并启动安装程序'
+  void window.harnessDesktop.installAppUpdate()
+})
+
+closeUpdateButton.addEventListener('click', () => window.harnessDesktop.closeUpdateWindow())
 
 document.getElementById('open-logs').addEventListener('click', () => window.harnessDesktop.openLogDirectory())
 document.getElementById('open-data').addEventListener('click', () => window.harnessDesktop.openDataDirectory())

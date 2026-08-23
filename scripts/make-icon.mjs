@@ -5,8 +5,7 @@ import pngToIco from 'png-to-ico'
 import sharp from 'sharp'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const source = (await readFile(resolve(root, 'assets', 'deepseek-fish.svg'), 'utf8'))
-  .replace('fill="#000"', 'fill="#4d6bfe"')
+const source = await readFile(resolve(root, 'assets', 'x-dsh-mark.svg'), 'utf8')
 const pngPath = resolve(root, 'assets', 'icon.png')
 const icoPath = resolve(root, 'assets', 'icon.ico')
 

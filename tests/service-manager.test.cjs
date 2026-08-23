@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { HarnessServiceManager } = require('../src/service-manager.cjs')
+const { HarnessServiceManager, managedArguments } = require('../src/service-manager.cjs')
 
 function logger() {
   return { info() {}, warn() {}, error() {} }
@@ -45,4 +45,12 @@ test('restart joins a cold start instead of terminating it', async () => {
   service.stop = async () => { throw new Error('restart must not stop an active cold start') }
 
   assert.equal(await service.restart(), expected)
+})
+
+test('managed Harness always starts headlessly with the private runtime', () => {
+  const args = managedArguments('C:/private/dsh/lib/bin.js', ['C:/private/desktop.patch.yml'], 3081)
+  assert.deepEqual(args, [
+    'C:/private/dsh/lib/bin.js', 'web', '--patch', 'C:/private/desktop.patch.yml', '--port', '3081', '--no-open',
+  ])
+  assert.equal(args.filter(value => value === '--no-open').length, 1)
 })

@@ -6,6 +6,7 @@ const RUNTIME_SUPPORT = Object.freeze({
   '0.1.0-rc.7': { status: 'legacy', note: '历史更新版本' },
   '0.1.0-rc.8': { status: 'legacy', note: '历史更新版本' },
   '0.1.1-rc.2': { status: 'qualified', note: 'X DSH Desktop 0.3.0 验证基线' },
+  '0.1.7-rc.1': { status: 'qualified', note: 'Windows 启动与认证烟测通过；上游报告已安装插件可能缺少子进程 peer 依赖' },
 })
 
 function normalizeVersion(value) {

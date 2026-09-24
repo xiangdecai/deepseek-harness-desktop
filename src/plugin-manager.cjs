@@ -78,7 +78,7 @@ class DesktopPluginManager {
     return { directory: destination, files: files.map(file => file.relative) }
   }
 
-  async inventory({ runtimePath, runtimeVersion, deliverables } = {}) {
+  async inventory({ runtimePath, runtimeVersion } = {}) {
     const findings = []
     const files = await existingFiles(this.dshHome)
     for (const file of files.filter(entry => entry.relative.endsWith('cordis.patch.yml'))) {
@@ -97,12 +97,6 @@ class DesktopPluginManager {
     const installed = Object.entries(dependencies).map(([name, version]) => ({
       name, version, source: 'user profile', enabled: true, scope: 'DSH_HOME', compatibility: '未验证', permissions: '由插件自身声明',
     }))
-    installed.unshift({
-      name: '@xiangong/dsh-client-ui-deliverables',
-      version: '1', source: 'desktop built-in', enabled: deliverables?.status === 'ready', scope: 'desktop runtime',
-      compatibility: deliverables?.status === 'ready' ? `已验证 Harness ${runtimeVersion}` : '与当前 Harness 不兼容，已禁用',
-      permissions: '仅通过 Harness host.openPath 打开本机路径；无文件写入权限',
-    })
     return {
       categories: PLUGIN_CATEGORIES,
       runtime: { path: runtimePath, version: runtimeVersion },

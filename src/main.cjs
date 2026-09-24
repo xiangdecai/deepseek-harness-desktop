@@ -5,14 +5,16 @@ const { autoUpdater } = require('electron-updater')
 const { mkdirSync } = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const { AppLogger } = require('./logger.cjs')
 const { HarnessServiceManager } = require('./service-manager.cjs')
-const { ensureHarnessRuntime } = require('./runtime-loader.cjs')
+const { ensureHarnessRuntime, harnessEntryPath } = require('./runtime-loader.cjs')
 const { HarnessRuntimeUpdater, runtimeVersion } = require('./runtime-updater.cjs')
 const { VisionBridge } = require('./vision-bridge.cjs')
 const { DesktopAppUpdater } = require('./desktop-updater.cjs')
-const { applyDesktopDeliverablesPatch } = require('./desktop-deliverables.cjs')
+const { removeLegacyDesktopDeliverables } = require('./legacy-desktop-deliverables.cjs')
 const { DesktopPluginManager } = require('./plugin-manager.cjs')
+const { isTrustedDocumentUrl, isTrustedIpcEvent } = require('./ipc-security.cjs')
 const {
   commitProfileRuntimeShadows,
   quarantineProfileRuntimeShadows,
@@ -24,6 +26,8 @@ const {
 } = require('./display-preferences.cjs')
 
 const PRODUCT_NAME = 'X DSH Desktop'
+const STARTUP_PAGE_URL = pathToFileURL(path.join(__dirname, 'ui', 'startup.html')).href
+const PLUGIN_CENTER_PAGE_URL = pathToFileURL(path.join(__dirname, 'ui', 'plugin-center.html')).href
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
@@ -48,7 +52,6 @@ let desktopUpdatePrompted = false
 let harnessUpdateStatus
 let displayPreferences = { textScale: DEFAULT_TEXT_SCALE }
 let pluginManager
-let deliverablesStatus
 let serviceRestartPromise
 
 async function restoreProfileShadowsOrLog(transaction) {
@@ -74,6 +77,30 @@ function ocrScriptPath() {
   return app.isPackaged ? script.replace('app.asar', 'app.asar.unpacked') : script
 }
 
+function trustedDocumentsForWindow(window) {
+  if (window === mainWindow) return [STARTUP_PAGE_URL, service?.url].filter(Boolean)
+  if (window === logWindow || window === updateWindow) return [STARTUP_PAGE_URL]
+  if (window === pluginWindow) return [PLUGIN_CENTER_PAGE_URL]
+  return []
+}
+
+function protectWebContents(window) {
+  const allowedUrls = () => trustedDocumentsForWindow(window)
+  const isAllowed = url => isTrustedDocumentUrl(url, allowedUrls())
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/iu.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  window.webContents.on('will-navigate', (event, url) => {
+    if (isAllowed(url)) return
+    event.preventDefault()
+    if (/^https?:/iu.test(url)) void shell.openExternal(url)
+  })
+  window.webContents.on('will-redirect', (event, url) => {
+    if (!isAllowed(url)) event.preventDefault()
+  })
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: DEFAULT_WINDOW_BOUNDS.width,
@@ -92,20 +119,12 @@ function createWindow() {
     },
   })
   mainWindow.webContents.setZoomFactor(displayPreferences.textScale)
+  protectWebContents(mainWindow)
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('close', event => {
     if (quitting) return
     event.preventDefault()
     mainWindow?.hide()
-  })
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/iu.test(url)) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('http://127.0.0.1:') || url.startsWith('file:')) return
-    event.preventDefault()
-    if (/^https?:/iu.test(url)) void shell.openExternal(url)
   })
 }
 
@@ -162,6 +181,7 @@ function createLogWindow() {
       sandbox: true,
     },
   })
+  protectWebContents(logWindow)
   void showStartupPage(logWindow)
   logWindow.on('closed', () => { logWindow = undefined })
 }
@@ -186,6 +206,7 @@ function createUpdateWindow() {
       sandbox: true,
     },
   })
+  protectWebContents(updateWindow)
   updateWindow.once('ready-to-show', () => updateWindow?.show())
   void showStartupPage(updateWindow)
   updateWindow.on('closed', () => { updateWindow = undefined })
@@ -218,6 +239,7 @@ function createPluginCenter() {
       preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true,
     },
   })
+  protectWebContents(pluginWindow)
   void pluginWindow.loadFile(path.join(__dirname, 'ui', 'plugin-center.html'))
   pluginWindow.on('closed', () => { pluginWindow = undefined })
 }
@@ -288,9 +310,7 @@ async function installHarnessUpdate(update) {
       runtimeVersion: runtimeVersionValue,
       logger,
     })
-    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
-    service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
-    service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
+    service.dshEntry = harnessEntryPath(runtimePath)
     await service.start()
     await runtimeUpdater.markHealthy(runtimePath)
     await commitProfileRuntimeShadows(profileShadowTransaction, logger)
@@ -309,10 +329,7 @@ async function installHarnessUpdate(update) {
     await runtimeUpdater.rollbackPending()
     runtimePath = previousRuntime
     runtimeVersionValue = previousVersion
-    deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
-    if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable after rollback: ${deliverablesStatus.reason}`, 'plugins')
-    service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
-    service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
+    service.dshEntry = harnessEntryPath(runtimePath)
     if (serviceStopped) {
       try {
         await service.start()
@@ -553,7 +570,17 @@ function createTray() {
 }
 
 function registerIpc() {
-  ipcMain.handle('desktop:get-state', event => ({
+  const handle = (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    const allowedUrls = trustedDocumentsForWindow(sourceWindow)
+    if (!isTrustedIpcEvent(event, { webContents: sourceWindow?.webContents, allowedUrls })) {
+      logger?.warn(`Rejected IPC from an untrusted renderer (${channel}).`, 'security')
+      throw new Error('Rejected untrusted desktop IPC sender')
+    }
+    return listener(event, ...args)
+  })
+
+  handle('desktop:get-state', event => ({
     service: service.status,
     logs: logger.snapshot(),
     logFile: logger.filePath,
@@ -563,19 +590,19 @@ function registerIpc() {
     appUpdate: desktopUpdater?.status,
     isUpdateWindow: BrowserWindow.fromWebContents(event.sender) === updateWindow,
   }))
-  ipcMain.handle('desktop:restart', restartService)
-  ipcMain.handle('desktop:open-browser', () => service.url ? shell.openExternal(service.url) : undefined)
-  ipcMain.handle('desktop:open-data-directory', () => shell.openPath(service.dshHome))
-  ipcMain.handle('desktop:open-log-directory', () => shell.openPath(path.dirname(logger.filePath)))
-  ipcMain.handle('desktop:check-app-update', () => checkDesktopUpdate({ manual: true }))
-  ipcMain.handle('desktop:install-app-update', () => desktopUpdater?.install())
-  ipcMain.handle('desktop:close-update-window', () => updateWindow?.close())
-  ipcMain.handle('desktop:set-chat-text-scale', (_event, textScale) => setChatTextScale(textScale))
-  ipcMain.handle('desktop:get-plugin-inventory', () => pluginManager.inventory({ runtimePath, runtimeVersion: runtimeVersionValue, deliverables: deliverablesStatus }))
-  ipcMain.handle('desktop:backup-plugin-state', () => pluginManager.backup('manual'))
-  ipcMain.handle('desktop:open-plugin-backups', () => shell.openPath(pluginManager.backupDirectory()))
-  ipcMain.handle('vision:is-enabled', () => visionEnabled)
-  ipcMain.handle('vision:analyze', (_event, payload) => vision.analyze(payload))
+  handle('desktop:restart', restartService)
+  handle('desktop:open-browser', () => service.url ? shell.openExternal(service.url) : undefined)
+  handle('desktop:open-data-directory', () => shell.openPath(service.dshHome))
+  handle('desktop:open-log-directory', () => shell.openPath(path.dirname(logger.filePath)))
+  handle('desktop:check-app-update', () => checkDesktopUpdate({ manual: true }))
+  handle('desktop:install-app-update', () => desktopUpdater?.install())
+  handle('desktop:close-update-window', () => updateWindow?.close())
+  handle('desktop:set-chat-text-scale', (_event, textScale) => setChatTextScale(textScale))
+  handle('desktop:get-plugin-inventory', () => pluginManager.inventory({ runtimePath, runtimeVersion: runtimeVersionValue }))
+  handle('desktop:backup-plugin-state', () => pluginManager.backup('manual'))
+  handle('desktop:open-plugin-backups', () => shell.openPath(pluginManager.backupDirectory()))
+  handle('vision:is-enabled', () => visionEnabled)
+  handle('vision:analyze', (_event, payload) => vision.analyze(payload))
 }
 
 async function boot() {
@@ -617,7 +644,6 @@ async function boot() {
   })
   runtimeUpdater = new HarnessRuntimeUpdater({
     userData: app.getPath('userData'), logger, nodeExecutable, pnpmCli,
-    patchRuntime: candidate => applyDesktopDeliverablesPatch(candidate, logger, dshHome),
   })
   const startupShadowTransactions = await recoverProfileRuntimeShadows({
     dshHome,
@@ -625,15 +651,13 @@ async function boot() {
     logger,
   })
   runtimePath = await runtimeUpdater.resolveSelected(fallbackRuntimePath, runtimeVersion(fallbackRuntimePath))
-  deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, dshHome)
-  if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable: ${deliverablesStatus.reason}`, 'plugins')
+  await removeLegacyDesktopDeliverables({ dshHome, runtimePaths: [runtimePath, fallbackRuntimePath], logger })
   runtimeVersionValue = runtimeVersion(runtimePath) || runtimeVersion(fallbackRuntimePath)
   const dshEntry = !app.isPackaged && process.env.DHD_DSH_ENTRY
     ? path.resolve(process.env.DHD_DSH_ENTRY)
-    : path.join(runtimePath, 'lib', 'bin.js')
+    : harnessEntryPath(runtimePath)
   service = new HarnessServiceManager({
     nodeExecutable, dshEntry, dshHome, cwd: workspace, logger,
-    patchFiles: deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : [],
   })
   vision = new VisionBridge({ cacheDirectory, scriptPath: ocrScriptPath(), logger })
   service.on('exit', ({ expected }) => {
@@ -661,10 +685,8 @@ async function boot() {
     if (fallback || path.resolve(runtimePath) !== path.resolve(fallbackRuntimePath)) {
       runtimePath = fallback || fallbackRuntimePath
       runtimeVersionValue = runtimeVersion(runtimePath)
-      deliverablesStatus = await applyDesktopDeliverablesPatch(runtimePath, logger, service.dshHome)
-      if (deliverablesStatus.status === 'incompatible') logger.warn(`Clickable deliverables unavailable after startup fallback: ${deliverablesStatus.reason}`, 'plugins')
-      service.dshEntry = path.join(runtimePath, 'lib', 'bin.js')
-      service.patchFiles = deliverablesStatus?.patchFile ? [deliverablesStatus.patchFile] : []
+      await removeLegacyDesktopDeliverables({ dshHome: service.dshHome, runtimePaths: [runtimePath], logger })
+      service.dshEntry = harnessEntryPath(runtimePath)
       try {
         await service.start()
         await runtimeUpdater.markHealthy(runtimePath)

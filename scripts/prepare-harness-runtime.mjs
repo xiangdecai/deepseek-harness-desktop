@@ -9,7 +9,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const staging = resolve(root, 'resources', 'harness')
 const licenses = resolve(root, 'resources', 'licenses')
 const pnpmCli = resolve(root, 'resources', 'pnpm-runtime', 'pnpm', 'bin', 'pnpm.cjs')
-const harnessVersion = process.env.DHD_HARNESS_VERSION ?? '0.1.1-rc.2'
+const harnessVersion = process.env.DHD_HARNESS_VERSION ?? '0.1.7-rc.1'
 const packageName = '@deepseek-ai/dsh'
 
 async function installedPackageManifests(nodeModules) {

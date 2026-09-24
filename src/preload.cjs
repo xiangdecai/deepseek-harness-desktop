@@ -2,34 +2,42 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
-contextBridge.exposeInMainWorld('harnessDesktop', {
-  getState: () => ipcRenderer.invoke('desktop:get-state'),
-  restart: () => ipcRenderer.invoke('desktop:restart'),
-  openBrowser: () => ipcRenderer.invoke('desktop:open-browser'),
-  openDataDirectory: () => ipcRenderer.invoke('desktop:open-data-directory'),
-  openLogDirectory: () => ipcRenderer.invoke('desktop:open-log-directory'),
-  checkAppUpdate: () => ipcRenderer.invoke('desktop:check-app-update'),
-  installAppUpdate: () => ipcRenderer.invoke('desktop:install-app-update'),
-  closeUpdateWindow: () => ipcRenderer.invoke('desktop:close-update-window'),
-  getPluginInventory: () => ipcRenderer.invoke('desktop:get-plugin-inventory'),
-  backupPluginState: () => ipcRenderer.invoke('desktop:backup-plugin-state'),
-  openPluginBackups: () => ipcRenderer.invoke('desktop:open-plugin-backups'),
-  onLog: callback => {
-    const listener = (_event, record) => callback(record)
-    ipcRenderer.on('desktop:log', listener)
-    return () => ipcRenderer.removeListener('desktop:log', listener)
-  },
-  onUpdateProgress: callback => {
-    const listener = (_event, progress) => callback(progress)
-    ipcRenderer.on('desktop:update-progress', listener)
-    return () => ipcRenderer.removeListener('desktop:update-progress', listener)
-  },
-  onAppUpdateProgress: callback => {
-    const listener = (_event, progress) => callback(progress)
-    ipcRenderer.on('desktop:app-update-progress', listener)
-    return () => ipcRenderer.removeListener('desktop:app-update-progress', listener)
-  },
-})
+function isDesktopControlPage() {
+  if (location.protocol !== 'file:') return false
+  const pathname = decodeURIComponent(location.pathname).replace(/\\/gu, '/').toLowerCase()
+  return pathname.endsWith('/src/ui/startup.html') || pathname.endsWith('/src/ui/plugin-center.html')
+}
+
+if (isDesktopControlPage()) {
+  contextBridge.exposeInMainWorld('harnessDesktop', {
+    getState: () => ipcRenderer.invoke('desktop:get-state'),
+    restart: () => ipcRenderer.invoke('desktop:restart'),
+    openBrowser: () => ipcRenderer.invoke('desktop:open-browser'),
+    openDataDirectory: () => ipcRenderer.invoke('desktop:open-data-directory'),
+    openLogDirectory: () => ipcRenderer.invoke('desktop:open-log-directory'),
+    checkAppUpdate: () => ipcRenderer.invoke('desktop:check-app-update'),
+    installAppUpdate: () => ipcRenderer.invoke('desktop:install-app-update'),
+    closeUpdateWindow: () => ipcRenderer.invoke('desktop:close-update-window'),
+    getPluginInventory: () => ipcRenderer.invoke('desktop:get-plugin-inventory'),
+    backupPluginState: () => ipcRenderer.invoke('desktop:backup-plugin-state'),
+    openPluginBackups: () => ipcRenderer.invoke('desktop:open-plugin-backups'),
+    onLog: callback => {
+      const listener = (_event, record) => callback(record)
+      ipcRenderer.on('desktop:log', listener)
+      return () => ipcRenderer.removeListener('desktop:log', listener)
+    },
+    onUpdateProgress: callback => {
+      const listener = (_event, progress) => callback(progress)
+      ipcRenderer.on('desktop:update-progress', listener)
+      return () => ipcRenderer.removeListener('desktop:update-progress', listener)
+    },
+    onAppUpdateProgress: callback => {
+      const listener = (_event, progress) => callback(progress)
+      ipcRenderer.on('desktop:app-update-progress', listener)
+      return () => ipcRenderer.removeListener('desktop:app-update-progress', listener)
+    },
+  })
+}
 
 async function insertEvidence(target, evidence) {
   const text = `\n\n${JSON.stringify(evidence, null, 2)}\n`
@@ -77,6 +85,7 @@ function showVisionStatus(message, tone = 'working') {
 window.addEventListener('DOMContentLoaded', () => {
   if (location.hostname !== '127.0.0.1') return
   document.addEventListener('paste', async event => {
+    if (!event.isTrusted) return
     const enabled = await ipcRenderer.invoke('vision:is-enabled')
     if (!enabled) return
     const imageItem = [...(event.clipboardData?.items ?? [])].find(item => item.kind === 'file' && item.type.startsWith('image/'))

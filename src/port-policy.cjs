@@ -5,12 +5,13 @@ const net = require('node:net')
 
 const HARNESS_TITLE = '<title>DeepSeek Harness</title>'
 
-function requestBody(port, timeoutMs = 1200) {
+function requestBody(port, timeoutMs = 1200, accessUrl) {
+  const target = accessUrl ? new URL(accessUrl) : undefined
   return new Promise((resolve, reject) => {
     const request = http.get({
       host: '127.0.0.1',
       port,
-      path: '/',
+      path: target ? `${target.pathname}${target.search}` : '/',
       timeout: timeoutMs,
       headers: { Accept: 'text/html' },
     }, response => {
@@ -19,21 +20,37 @@ function requestBody(port, timeoutMs = 1200) {
       response.on('data', chunk => {
         if (body.length < 64 * 1024) body += chunk
       })
-      response.on('end', () => resolve({ statusCode: response.statusCode ?? 0, body }))
+      response.on('end', () => resolve({
+        statusCode: response.statusCode ?? 0,
+        body,
+        location: response.headers.location,
+        setCookies: response.headers['set-cookie'] ?? [],
+      }))
     })
     request.once('timeout', () => request.destroy(new Error('probe timeout')))
     request.once('error', reject)
   })
 }
 
-async function probePort(port, timeoutMs = 1200) {
+async function probePort(port, timeoutMs = 1200, accessUrl) {
   try {
-    const response = await requestBody(port, timeoutMs)
+    const target = accessUrl ? new URL(accessUrl) : undefined
+    if (target && (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || target.port !== String(port) || target.pathname !== '/')) {
+      return { kind: 'occupied', port, error: 'invalid authenticated loopback URL' }
+    }
+    const response = await requestBody(port, timeoutMs, accessUrl)
+    let completedAuthRedirect = false
+    if (target && response.statusCode === 303 && response.location) {
+      const location = new URL(response.location, target)
+      const harnessCookie = response.setCookies.some(cookie => /^dsh-auth-[^=]+=\S+/u.test(cookie))
+      completedAuthRedirect = location.origin === target.origin && location.pathname === '/' && location.search === '' && harnessCookie
+    }
     const isHarness = response.statusCode >= 200
       && response.statusCode < 400
       && response.body.includes(HARNESS_TITLE)
+    const isAuthenticatedHarness = completedAuthRedirect
     return {
-      kind: isHarness ? 'harness' : 'occupied',
+      kind: isHarness || isAuthenticatedHarness ? 'harness' : 'occupied',
       port,
       statusCode: response.statusCode,
     }

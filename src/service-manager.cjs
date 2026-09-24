@@ -13,11 +13,25 @@ const BOOTSTRAP_ENV_NAMES = new Set([
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_TLS_REJECT_UNAUTHORIZED',
 ])
 
-function managedArguments(dshEntry, patchFiles, port) {
-  const args = [dshEntry, 'web']
-  for (const patch of patchFiles) args.push('--patch', patch)
-  args.push('--port', String(port), '--no-open')
-  return args
+function managedArguments(dshEntry, port) {
+  return [dshEntry, 'web', '--port', String(port), '--no-open']
+}
+
+function parseHarnessWebUrl(line, port) {
+  const match = /(?:^|\s)dsh web:\s+(https?:\/\/\S+)/u.exec(String(line))
+  if (!match) return undefined
+  try {
+    const url = new URL(match[1])
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port !== String(port) || url.pathname !== '/') return undefined
+    if (url.username || url.password || url.searchParams.size !== 1 || !url.searchParams.get('token')) return undefined
+    return url.toString()
+  } catch {
+    return undefined
+  }
+}
+
+function redactSensitiveOutput(value) {
+  return String(value).replace(/([?&](?:token|access_token|api_key|key|auth|secret)=)[^&#\s]*/giu, '$1[REDACTED]')
 }
 
 function projectBootstrapEnvKeys(cwd) {
@@ -46,7 +60,6 @@ class HarnessServiceManager extends EventEmitter {
     this.dshEntry = options.dshEntry
     this.dshHome = options.dshHome
     this.cwd = options.cwd
-    this.patchFiles = options.patchFiles ?? []
     this.logger = options.logger
     this.startupTimeoutMs = options.startupTimeoutMs ?? 45_000
     this.requiredReadyProbes = options.requiredReadyProbes ?? 2
@@ -54,6 +67,7 @@ class HarnessServiceManager extends EventEmitter {
     this.wait = options.wait ?? (delayMs => new Promise(resolve => setTimeout(resolve, delayMs)))
     this.child = undefined
     this.url = undefined
+    this.authenticatedUrl = undefined
     this.port = undefined
     this.mode = 'stopped'
     this.stopping = false
@@ -64,7 +78,7 @@ class HarnessServiceManager extends EventEmitter {
   get status() {
     return {
       mode: this.mode,
-      url: this.url,
+      url: redactSensitiveOutput(this.url),
       port: this.port,
       pid: this.child?.pid,
       dshHome: this.dshHome,
@@ -112,11 +126,12 @@ class HarnessServiceManager extends EventEmitter {
     this.mode = 'starting'
     this.port = port
     this.url = `http://127.0.0.1:${port}`
+    this.authenticatedUrl = undefined
     this.logger.info(`Starting private runtime with absolute Node path: ${this.nodeExecutable}`)
     this.logger.info(`DSH_HOME=${this.dshHome}`)
     this.logger.info(`Workspace=${this.cwd}`)
 
-    const args = managedArguments(this.dshEntry, this.patchFiles, port)
+    const args = managedArguments(this.dshEntry, port)
     const child = spawn(this.nodeExecutable, args, {
       cwd: this.cwd,
       env: {
@@ -128,8 +143,8 @@ class HarnessServiceManager extends EventEmitter {
       windowsHide: true,
     })
     this.child = child
-    this.pipeLines(child.stdout, 'harness')
-    this.pipeLines(child.stderr, 'harness:error', 'warn')
+    this.pipeLines(child.stdout, 'harness', 'info', port)
+    this.pipeLines(child.stderr, 'harness:error', 'warn', port)
 
     child.once('error', error => {
       this.logger.error(`Harness process failed to spawn: ${error.message}`)
@@ -144,7 +159,7 @@ class HarnessServiceManager extends EventEmitter {
 
     await this.waitUntilReady(child, port)
     this.mode = 'managed'
-    this.logger.info(`Harness is ready at ${this.url}.`)
+    this.logger.info(`Harness is ready at ${redactSensitiveOutput(this.url)}.`)
     this.emit('ready', this.status)
     return this.status
   }
@@ -217,11 +232,14 @@ class HarnessServiceManager extends EventEmitter {
     }
   }
 
-  pipeLines(stream, source, level = 'info') {
+  pipeLines(stream, source, level = 'info', port = this.port) {
     if (stream === null) return
     const lines = createInterface({ input: stream })
     lines.on('line', line => {
-      if (line.trim() !== '') this.logger[level](line, source)
+      if (line.trim() === '') return
+      const authenticatedUrl = parseHarnessWebUrl(line, port)
+      if (authenticatedUrl) this.url = this.authenticatedUrl = authenticatedUrl
+      this.logger[level](redactSensitiveOutput(line), source)
     })
   }
 
@@ -230,7 +248,7 @@ class HarnessServiceManager extends EventEmitter {
     let consecutiveReadyProbes = 0
     while (Date.now() - startedAt < this.startupTimeoutMs) {
       if (child.exitCode !== null) throw new Error(`Harness exited before readiness with code ${child.exitCode}`)
-      const probe = await this.probe(port, 600)
+      const probe = await this.probe(port, 600, this.authenticatedUrl)
       if (probe.kind === 'harness') {
         consecutiveReadyProbes += 1
         if (consecutiveReadyProbes >= this.requiredReadyProbes) return
@@ -253,4 +271,4 @@ class HarnessServiceManager extends EventEmitter {
   }
 }
 
-module.exports = { HarnessServiceManager, managedArguments }
+module.exports = { HarnessServiceManager, managedArguments, parseHarnessWebUrl, redactSensitiveOutput }

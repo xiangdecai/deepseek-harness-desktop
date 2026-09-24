@@ -52,6 +52,11 @@ function validRuntime(directory, version) {
   }
 }
 
+function harnessEntryPath(directory) {
+  const officialEntry = path.join(directory, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  return existsSync(officialEntry) ? officialEntry : path.join(directory, 'lib', 'bin.js')
+}
+
 function expandArchive(archive, destination) {
   const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
   return new Promise((resolvePromise, reject) => {
@@ -70,4 +75,4 @@ function expandArchive(archive, destination) {
   })
 }
 
-module.exports = { ensureHarnessRuntime, validRuntime }
+module.exports = { ensureHarnessRuntime, harnessEntryPath, validRuntime }

@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { HarnessServiceManager, managedArguments } = require('../src/service-manager.cjs')
+const { HarnessServiceManager, managedArguments, parseHarnessWebUrl, redactSensitiveOutput } = require('../src/service-manager.cjs')
 
 function logger() {
   return { info() {}, warn() {}, error() {} }
@@ -48,9 +48,15 @@ test('restart joins a cold start instead of terminating it', async () => {
 })
 
 test('managed Harness always starts headlessly with the private runtime', () => {
-  const args = managedArguments('C:/private/dsh/lib/bin.js', ['C:/private/desktop.patch.yml'], 3081)
-  assert.deepEqual(args, [
-    'C:/private/dsh/lib/bin.js', 'web', '--patch', 'C:/private/desktop.patch.yml', '--port', '3081', '--no-open',
-  ])
+  const args = managedArguments('C:/private/dsh/lib/bin.js', 3081)
+  assert.deepEqual(args, ['C:/private/dsh/lib/bin.js', 'web', '--port', '3081', '--no-open'])
   assert.equal(args.filter(value => value === '--no-open').length, 1)
+})
+
+test('managed Harness captures only its own loopback auth URL and redacts the token from logs', () => {
+  const line = 'dsh web: http://127.0.0.1:3081/?token=smoke-test-token'
+  assert.equal(parseHarnessWebUrl(line, 3081), 'http://127.0.0.1:3081/?token=smoke-test-token')
+  assert.equal(parseHarnessWebUrl(line, 3080), undefined)
+  assert.equal(parseHarnessWebUrl(line.replace('127.0.0.1', 'example.com'), 3081), undefined)
+  assert.equal(redactSensitiveOutput(line), 'dsh web: http://127.0.0.1:3081/?token=[REDACTED]')
 })

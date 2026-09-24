@@ -130,7 +130,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not inspect tag $tag." }
             if ($tagParent -ne $env:GITHUB_SHA) { throw "Existing tag $tag belongs to a different source commit; refusing to overwrite it." }
           } else {
-            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit --only -m "chore(release): $tag" -- package.json package-lock.json
+            git add -A -- package.json package-lock.json THIRD_PARTY_NOTICES.md DESKTOP_THIRD_PARTY_NOTICES.md PNPM_THIRD_PARTY_NOTICES.md resources/licenses
+            if ($LASTEXITCODE -ne 0) { throw "Could not stage version and generated license files for $tag." }
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(release): $tag"
             if ($LASTEXITCODE -ne 0) { throw "Could not create the version snapshot for $tag." }
             git tag -a $tag -m "X DSH Desktop $tag"
             if ($LASTEXITCODE -ne 0) { throw "Could not create tag $tag." }

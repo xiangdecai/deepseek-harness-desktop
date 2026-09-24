@@ -54,8 +54,8 @@ npm.cmd run pack:win
 
 安装器和便携版输出到 `dist/`：
 
-- `X-DSH-Desktop-Setup-0.3.1-x64.exe`
-- `X-DSH-Desktop-Portable-0.3.1-x64.exe`
+- `X-DSH-Desktop-Setup-<version>-x64.exe`
+- `X-DSH-Desktop-Portable-<version>-x64.exe`
 
 0.3.1 Windows x64 构建实测：安装器 295.84 MiB，便携版 295.62 MiB，内含官方 Harness `0.1.7-rc.1`。已完成隔离 runtime 下的 Windows 本地认证及 HTTP/UI 烟测；首次展开后固定 runtime 位于 Electron `userData/runtime/`，升级版本使用独立目录，不读取系统 Node 或 `dsh`。
 
@@ -67,14 +67,7 @@ npm.cmd run pack:win
 
 ## 桌面应用更新发布
 
-安装版通过 Electron 的 NSIS 更新通道读取本仓库 GitHub Release。发布者在已准备 runtime 的 Windows 环境中设置 `GH_TOKEN`，然后运行：
-
-```powershell
-npm.cmd test
-npm.cmd run pack:win -- --publish always
-```
-
-Release 必须同时上传 Setup `.exe`、`latest.yml` 与对应 `.blockmap`，以便已有安装版下载并校验更新。应用更新失败会保留现有版本和全部用户数据；Portable 版没有后台更新能力。
+每次向 `main` 推送都会排队触发 Windows 构建、测试并发布一个公开 GitHub Release。版本从 `package.json` 起算；如果不高于当前最新 Release，则自动递增补丁号。版本只写入发布标签对应的版本快照，不回写 `main`。Release 包含 Setup、Portable、`latest.yml` 和 Setup `.blockmap`；自动更新依赖后三项中的 Setup、`latest.yml` 与 `.blockmap`。当前安装包未进行代码签名，Windows 可能显示未知发布者提示。应用更新失败会保留现有版本和全部用户数据；Portable 版没有后台更新能力。
 
 ## 官方 Harness 更新
 

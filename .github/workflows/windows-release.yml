@@ -1,0 +1,164 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  queue: max
+
+jobs:
+  release:
+    name: Test, package, and publish
+    runs-on: windows-2025
+    steps:
+      - name: Check out the exact pushed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Select the next release version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $packageVersionText = (node -p "require('./package.json').version").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read package.json version.' }
+          $packageVersion = [version]$packageVersionText
+
+          $latestTag = (gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $latestTag) { throw 'Could not read the latest GitHub Release.' }
+          $latestVersion = [version]$latestTag.TrimStart('v')
+
+          git fetch --no-tags origin "+refs/tags/${latestTag}:refs/tags/${latestTag}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch release tag $latestTag." }
+          $latestCommit = (git rev-parse "$latestTag^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Could not resolve release tag $latestTag." }
+
+          git merge-base --is-ancestor $env:GITHUB_SHA $latestCommit
+          $alreadyReleased = $LASTEXITCODE
+          if ($alreadyReleased -eq 0) {
+            "release_version=$($latestVersion.ToString(3))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            'skip_release=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "This commit is already included in $latestTag; skipping a duplicate release."
+            exit 0
+          }
+          if ($alreadyReleased -ne 1) { throw 'Could not compare the pushed commit with the latest release.' }
+
+          if ($packageVersion -gt $latestVersion) {
+            $releaseVersion = $packageVersion
+          } else {
+            $releaseVersion = [version]::new($latestVersion.Major, $latestVersion.Minor, $latestVersion.Build + 1)
+          }
+
+          while ($true) {
+            $tag = "v$($releaseVersion.ToString(3))"
+            $remoteTag = git ls-remote origin "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw "Could not check whether tag $tag already exists." }
+            if (-not $remoteTag) { break }
+
+            git fetch --no-tags origin "+refs/tags/${tag}:refs/tags/${tag}"
+            if ($LASTEXITCODE -ne 0) { throw "Could not fetch existing tag $tag." }
+            $tagCommit = (git rev-parse "$tag^{commit}").Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Could not resolve existing tag $tag." }
+            $tagParent = (git show -s --format=%P $tagCommit).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tag $tag." }
+            if ($tagParent -eq $env:GITHUB_SHA) { break }
+            $releaseVersion = [version]::new($releaseVersion.Major, $releaseVersion.Minor, $releaseVersion.Build + 1)
+          }
+
+          $releaseVersionText = $releaseVersion.ToString(3)
+          npm version $releaseVersionText --no-git-tag-version --allow-same-version
+          if ($LASTEXITCODE -ne 0) { throw "Could not set build version to $releaseVersionText." }
+
+          "release_version=$releaseVersionText" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          'skip_release=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install desktop dependencies
+        if: steps.version.outputs.skip_release != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Prepare the official Harness runtime
+        if: steps.version.outputs.skip_release != 'true'
+        run: npm run prepare:runtime
+
+      - name: Run tests
+        if: steps.version.outputs.skip_release != 'true'
+        run: npm test
+
+      - name: Build Windows installers
+        if: steps.version.outputs.skip_release != 'true'
+        run: npm run pack:win -- --publish never
+
+      - name: Publish the release and update assets
+        if: steps.version.outputs.skip_release != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "v$env:RELEASE_VERSION"
+          $tagRecord = git ls-remote origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Could not check remote tag $tag." }
+
+          if ($tagRecord) {
+            git fetch --no-tags origin "+refs/tags/${tag}:refs/tags/${tag}"
+            if ($LASTEXITCODE -ne 0) { throw "Could not fetch tag $tag." }
+            $tagCommit = (git rev-parse "$tag^{commit}").Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Could not resolve tag $tag." }
+            $tagParent = (git show -s --format=%P $tagCommit).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect tag $tag." }
+            if ($tagParent -ne $env:GITHUB_SHA) { throw "Existing tag $tag belongs to a different source commit; refusing to overwrite it." }
+          } else {
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit --only -m "chore(release): $tag" -- package.json package-lock.json
+            if ($LASTEXITCODE -ne 0) { throw "Could not create the version snapshot for $tag." }
+            git tag -a $tag -m "X DSH Desktop $tag"
+            if ($LASTEXITCODE -ne 0) { throw "Could not create tag $tag." }
+            git push origin "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw "Could not push tag $tag." }
+          }
+
+          $assets = @(
+            "dist/X-DSH-Desktop-Setup-$env:RELEASE_VERSION-x64.exe",
+            "dist/X-DSH-Desktop-Setup-$env:RELEASE_VERSION-x64.exe.blockmap",
+            'dist/latest.yml',
+            "dist/X-DSH-Desktop-Portable-$env:RELEASE_VERSION-x64.exe"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) { throw "Required release asset is missing: $asset" }
+          }
+
+          $existingAssetJson = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '[.assets[].name]' 2>$null
+          $releaseViewExit = $LASTEXITCODE
+          if ($releaseViewExit -eq 0) {
+            $existingAssets = @($existingAssetJson | ConvertFrom-Json)
+            foreach ($asset in $assets) {
+              $assetName = Split-Path -Leaf $asset
+              if ($existingAssets -notcontains $assetName) {
+                gh release upload $tag $asset --repo $env:GITHUB_REPOSITORY
+                if ($LASTEXITCODE -ne 0) { throw "Could not upload release asset $assetName." }
+              }
+            }
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --latest --title "X DSH Desktop $tag"
+            if ($LASTEXITCODE -ne 0) { throw "Could not publish the completed release $tag." }
+          } else {
+            $notes = 'Windows installers are currently unsigned; SmartScreen may show an unknown publisher warning.'
+            gh release create $tag @assets --repo $env:GITHUB_REPOSITORY --verify-tag --title "X DSH Desktop $tag" --notes $notes --generate-notes --latest
+            if ($LASTEXITCODE -ne 0) { throw "Could not publish GitHub Release $tag." }
+          }

@@ -78,7 +78,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not resolve existing tag $tag." }
             $tagParent = (git show -s --format=%P $tagCommit).Trim()
             if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tag $tag." }
-            if ($tagParent -eq $env:GITHUB_SHA) { break }
+            if ($tagCommit -eq $env:GITHUB_SHA -or $tagParent -eq $env:GITHUB_SHA) { break }
             $releaseVersion = [version]::new($releaseVersion.Major, $releaseVersion.Minor, $releaseVersion.Build + 1)
           }
 
@@ -128,12 +128,18 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not resolve tag $tag." }
             $tagParent = (git show -s --format=%P $tagCommit).Trim()
             if ($LASTEXITCODE -ne 0) { throw "Could not inspect tag $tag." }
-            if ($tagParent -ne $env:GITHUB_SHA) { throw "Existing tag $tag belongs to a different source commit; refusing to overwrite it." }
+            if ($tagCommit -ne $env:GITHUB_SHA -and $tagParent -ne $env:GITHUB_SHA) { throw "Existing tag $tag belongs to a different source commit; refusing to overwrite it." }
           } else {
-            git add -A -- package.json package-lock.json THIRD_PARTY_NOTICES.md DESKTOP_THIRD_PARTY_NOTICES.md PNPM_THIRD_PARTY_NOTICES.md resources/licenses
-            if ($LASTEXITCODE -ne 0) { throw "Could not stage version and generated license files for $tag." }
-            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(release): $tag"
-            if ($LASTEXITCODE -ne 0) { throw "Could not create the version snapshot for $tag." }
+            git add -- package.json package-lock.json
+            if ($LASTEXITCODE -ne 0) { throw "Could not stage version files for $tag." }
+            git diff --cached --quiet -- package.json package-lock.json
+            $versionDiffExit = $LASTEXITCODE
+            if ($versionDiffExit -eq 1) {
+              git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(release): $tag"
+              if ($LASTEXITCODE -ne 0) { throw "Could not create the version snapshot for $tag." }
+            } elseif ($versionDiffExit -ne 0) {
+              throw "Could not inspect staged version files for $tag."
+            }
             git tag -a $tag -m "X DSH Desktop $tag"
             if ($LASTEXITCODE -ne 0) { throw "Could not create tag $tag." }
             git push origin "refs/tags/$tag"

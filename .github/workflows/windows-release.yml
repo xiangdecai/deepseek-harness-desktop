@@ -93,6 +93,10 @@ jobs:
         if: steps.version.outputs.skip_release != 'true'
         run: npm ci --no-audit --no-fund
 
+      - name: Install Electron distribution
+        if: steps.version.outputs.skip_release != 'true'
+        run: node node_modules/electron/install.js
+
       - name: Prepare the official Harness runtime
         if: steps.version.outputs.skip_release != 'true'
         run: npm run prepare:runtime

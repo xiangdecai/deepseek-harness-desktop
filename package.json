@@ -5,6 +5,10 @@
   "author": "Xiangong AI",
   "license": "MIT",
   "private": true,
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "sharp@0.34.4": true
+  },
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
